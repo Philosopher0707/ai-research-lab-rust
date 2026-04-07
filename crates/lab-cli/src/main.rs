@@ -2,44 +2,53 @@
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use lab_agents::researcher::ResearcherAgent;
-use lab_agents::reviewer::ReviewerAgent;
-use lab_agents::summarizer::SummarizerAgent;
-use lab_agents::collaborator::MultiAgentCollaborator;
 use lab_api;
 use lab_core::{LabConfig, ResearchLab};
-use lab_reports::ReportGenerator;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+fn banner_lines() -> Vec<String> {
+    vec![
+        format!("{}  {}     ██╗     ███████╗██╗  ██╗ █████╗ ██╗  ██╗",
+            "██╗".cyan(), "██║".bold().cyan()),
+        format!("{}  {}     ██║     ██╔════╝██║  ██║██╔══██╗██║ ██╔╝",
+            "██║".cyan(), "██║".bold().cyan()),
+        format!("{}  {}     ██║     █████╗  ███████║███████║█████╔╝",
+            "██║".cyan(), "██║".bold().cyan()),
+        format!("{}  {}     ██║     ██╔══╝  ██╔══██║██╔══██║██╔═██╗",
+            "██║".cyan(), "██║".bold().cyan()),
+        format!("{}  ██║  ███████╗███████╗██║  ██║██║  ██║██║  ██╗",
+            "██║".cyan()),
+        format!("{}  ╚═╝  ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ Code 🧪",
+            "╚".cyan()),
+    ]
+}
+
 #[derive(Parser)]
-#[command(name = "lab", about = "AI Research Lab — agentic research CLI", version)]
+#[command(name = "lab", about = "AI Research Lab — interactive agentic CLI", version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize the lab workspace
     Init {
-        /// Workspace directory
         #[arg(short, long, default_value = ".")]
         workspace: String,
     },
-    /// Run a full research pipeline (Researcher → Reviewer → Summarizer)
+    /// Run a full research pipeline
     Pipeline {
         #[command(subcommand)]
         subcommand: PipelineCommands,
     },
     /// Ask a question about your codebase using LLM
     Ask {
-        /// The question to ask
         question: String,
     },
     /// Serve the REST API + WebSocket server
     Serve {
-        /// Port to bind to
         #[arg(short, long, default_value = "8000")]
         port: u16,
     },
@@ -49,7 +58,6 @@ enum Commands {
     List,
     /// Clear all memory
     Clear {
-        /// Confirm clearing
         #[arg(long)]
         yes: bool,
     },
@@ -61,21 +69,14 @@ enum Commands {
 enum PipelineCommands {
     /// Run a full research pipeline
     Run {
-        /// File pattern to analyze (glob)
         #[arg(long, default_value = "**/*.py")]
         pattern: String,
-        /// Path to filter by (optional)
         #[arg(long)]
         path: Option<String>,
-        /// Disable the review phase
         #[arg(long, default_value = "false")]
         no_review: bool,
-        /// Disable code generation
         #[arg(long, default_value = "false")]
         no_code: bool,
-        /// Enable LLM analysis (adds ~5-10s)
-        #[arg(long, default_value = "false")]
-        llm: bool,
     },
 }
 
@@ -83,296 +84,210 @@ enum PipelineCommands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Commands::Init { workspace } => {
-            let ws = if workspace != "." {
-                let p = PathBuf::from(&workspace);
-                std::fs::create_dir_all(&p)?;
-                p
-            } else {
-                std::env::current_dir()?
-            };
-            let config = LabConfig::with_workspace(ws.clone());
-            println!(
-                "{}",
-                format!("Initialized AI Research Lab workspace: {}", ws.display())
-                    .green()
-                    .bold()
-            );
-
-            println!(
-                "Workspace dirs:  {}  Memory: {}  Outputs: {}",
-                config.full_path(&config.sessions_dir).display(),
-                config.full_path(&config.memory_dir).display(),
-                config.full_path(&config.outputs_dir).display(),
-            );
-
-            println!("Run `lab pipeline run` to start a full research task.");
-        }
-
-        Commands::Pipeline { subcommand } => match subcommand {
-            PipelineCommands::Run { pattern, path, no_review, no_code, llm } => {
-                let config = LabConfig::default();
-                let workspace = config.workspace.clone();
-                let memory_dir = config.full_path(&config.memory_dir);
-                let mut lab = ResearchLab::new(config);
-
-                let session = lab.create_session("pipeline-run").await?;
-                let session_id = "pipeline-run".to_string();
-
-                // Create fresh components for pipeline
-                let mut registry = lab_tools::ToolRegistry::new(workspace);
-                registry.register_builtins();
-                let mut mem = lab_memory::MemoryWorkspace::new(memory_dir);
-                // Build stages based on flags
-                let mut pipeline_stages = vec!["discover".into(), "research".into(), "analyze".into()];
-                if !no_code {
-                    pipeline_stages.push("code".into());
-                }
-                if !no_review {
-                    pipeline_stages.push("review".into());
-                }
-                pipeline_stages.push("summarize".into());
-                
-                let pipeline_config = lab_pipelines::PipelineConfig {
-                    name: "cli-pipeline".to_string(),
-                    stages: pipeline_stages,
-                    input_targets: vec![pattern.clone()],
-                    max_concurrent_stages: 1,
-                    fail_fast: true,
-                    retry_on_failure: false,
-                    timeout_per_stage_secs: 1800,
-                    output_path: None,
-                    exclude_patterns: vec![],
-                };
-                let mut pipeline = lab_pipelines::ResearchPipeline::new(
-                    pipeline_config,
-                    session_id.clone(),
-                );
-
-                // Disable LLM in pipeline for speed (use 'lab ask' for AI queries)
-                let result = pipeline.run(&mut registry, &mut mem, None, None).await;
-
-                // Print results before cleanup
-                println!("{}", "═══ Pipeline Results ═══".bold().cyan());
-                println!("Status: {}", match result.status.as_str() {
-                    "completed" => "✅ Completed".green(),
-                    "failed" => "❌ Failed".red(),
-                    _ => "⚠️ Partial".yellow(),
-                });
-                for stage in &result.stage_results {
-                    let icon = if matches!(stage.status, lab_pipelines::StageStatus::Completed) { "✅" } else { "❌" };
-                    println!("  {} {} ({:.1}s)", icon, stage.name.bold(), stage.duration_secs);
-                    if let Some(e) = &stage.error {
-                        println!("    {}", e.red().dimmed());
-                    }
-                }
-    
-                let result = pipeline.run(&mut registry, &mut mem, None, None).await;
-
-                let _ = lab.shutdown().await;
-                lab.shutdown().await?;
-            }
-        },
-
-
-        Commands::Ask { question } => {
-            println!("{} {}", "🤔 Asking LLM:".cyan().bold(), question);
-
-            
-            let config = LabConfig::default();
-            let workspace = config.workspace.clone();
-            let lab = ResearchLab::new(config);
-            
-            if !lab.has_llm() {
-                eprintln!("{} LLM is not configured. Set API key via environment variables.", "❌".red());
-                eprintln!("   Expected: export ANTHROPIC_API_KEY='...'");
-                std::process::exit(1);
-            }
-
-            // Auto-gather context: Read key files to give LLM actual code
-            let mut context = format!("Project root: {}\n\n", workspace.display());
-            
-            let key_files = vec!["Cargo.toml", "README.md", "DESIGN.md"];
-            for file_name in key_files {
-                let file_path = workspace.join(file_name);
-                if file_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&file_path) {
-                        let preview = if content.len() > 3000 {
-                            format!("{}\n...[truncated]", &content[..3000])
-                        } else {
-                            content.clone()
-                        };
-                        context.push_str(&format!("=== {file_name} ===\n{preview}\n\n"));
-                    }
-                }
-            }
-            
-            // List top directories
-            if let Ok(entries) = std::fs::read_dir(&workspace) {
-                let mut dirs = Vec::new();
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        dirs.push(entry.file_name().to_string_lossy().to_string());
-                    }
-                }
-                context.push_str(&format!("Top-level directories: {}\n", dirs.join(", ")));
-            }
-            
-            // Read main binary entry point
-            let main_rs = workspace.join("crates/lab-cli/src/main.rs");
-            if main_rs.exists() {
-                if let Ok(content) = std::fs::read_to_string(&main_rs) {
-                    let preview = if content.len() > 2000 { &content[..2000] } else { &content };
-                    context.push_str(&format!("\n=== crates/lab-cli/src/main.rs (first 2000 chars) ===\n{preview}\n"));
-                }
-            }
-
-            let system_prompt = "You are an expert AI code reviewer. Analyze the provided project files and answer the user's question clearly. Be concise.";
-            let full_prompt = format!("{context}\n\nUser Question: {question}");
-
-            let response = lab.ask_llm(&full_prompt, system_prompt, 0.2, 4096).await;
-            
-            if let Some(text) = response {
-                println!("{text}");
-            } else {
-                eprintln!("{} No response received from LLM.", "❌".red());
-            }
-        }
-
-        Commands::Serve { port } => {
-            println!("{} Binding to 0.0.0.0:{}", "🚀 Starting API Server:".green().bold(), port);
-            let config = LabConfig::default();
-            config.ensure_directories();
-            
-            let state = Arc::new(lab_api::AppState::new(config).await);
-            let router = lab_api::create_router(state.clone());
-            let addr = format!("0.0.0.0:{}", port);
-            
-            println!("🌐 REST Endpoints:");
-            println!("  GET  /sessions");
-            println!("  POST /sessions");
-            println!("  GET  /tools");
-            println!("  POST /tools/execute");
-            println!("  GET  /memory/:id");
-            println!("  POST /pipelines/run");
-            println!("  WS   /events (Real-time logs)");
-
-
-            let listener = tokio::net::TcpListener::bind(&addr).await?;
-            axum::serve(listener, router).await?;
-        }
-
-        Commands::Tools => {
-            let config = LabConfig::default();
-            let lab = ResearchLab::new(config);
-            let tools = lab.tools().list_tools();
-            println!(
-                "{} {}",
-                "═ Registered tools:".bold().yellow(),
-                format!("({} total) =", tools.len()).bold().yellow()
-            );
-            for tool in &tools {
-                let name = tool.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let desc = tool.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                let category = tool.get("category").and_then(|v| v.as_str()).unwrap_or("");
-                println!("  {} — {} [{}]", name.bold(), desc, category);
-            }
-        }
-
-        Commands::List => {
-            let config = LabConfig::default();
-            let mut lab = ResearchLab::new(config);
-            lab.start().await?;
-            let _ = lab.create_session("temp").await;
-            
-            let sessions = lab.list_sessions();
-            println!(
-                "{} {}",
-                "═ Sessions:".bold().cyan(),
-                format!("({})", sessions.len()).bold().cyan()
-            );
-            for session in &sessions {
-                println!(
-                    "  • [{}] {} — {:?} ({} agents)",
-                    session.id, session.name, session.status, session.agents_active
-                );
-            }
-            lab.shutdown().await?;
-        }
-
-        Commands::Clear { yes } => {
-            let config = LabConfig::default();
-            let lab = ResearchLab::new(config);
-            let count = lab.memory().entry_count();
-            if count == 0 {
-                println!("{} Memory is already empty.", "ℹ".yellow());
-            } else if yes {
-                let ws = &lab.memory().workspace;
-                if ws.exists() {
-                    std::fs::remove_dir_all(ws)?;
-                }
-                println!(
-                    "{} Cleared {} entries at {}",
-                    "✓".green().bold(),
-                    count,
-                    ws.display()
-                );
-            } else {
-                println!(
-                    "{} Would clear {} entries. Use `lab clear --yes` to confirm.",
-                    "⚠".yellow().bold(),
-                    count
-                );
-            }
-        }
-
-        Commands::Status => {
-            let config = LabConfig::default();
-            println!("{}", "═══ AI Research Lab Status ═══".bold().cyan());
-            
-            // Check Workspace
-            let ws = &config.workspace;
-            if ws.exists() {
-                println!("{} {}", "Workspace:".dimmed(), ws.display());
-            } else {
-                println!("{} No workspace found. Run `lab init` first.", "⚠️".yellow());
-            }
-
-            // Check Sessions
-            let sessions_dir = config.full_path(&config.sessions_dir);
-            let session_count = if sessions_dir.exists() {
-                std::fs::read_dir(&sessions_dir)
-                    .map(|d| d.filter(|e| e.as_ref().map(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false)).unwrap_or(false)).count())
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            println!("{} {} (at {})", "Sessions:".dimmed(), session_count, sessions_dir.display());
-
-            // Check Memory
-            let memory_dir = config.full_path(&config.memory_dir);
-            let memory_entries = if memory_dir.exists() {
-                std::fs::read_dir(&memory_dir)
-                    .map(|d| d.filter(|e| e.as_ref().map(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)).unwrap_or(false)).count())
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            println!("{} {} (at {})", "Memory:".dimmed(), memory_entries, memory_dir.display());
-
-            // Check Outputs
-            let outputs_dir = config.full_path(&config.outputs_dir);
-            let outputs_count = if outputs_dir.exists() {
-                std::fs::read_dir(&outputs_dir)
-                    .map(|d| d.filter(|e| e.as_ref().map(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false)).unwrap_or(false)).count())
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            println!("{} {}", "Outputs:".dimmed(), outputs_count);
-        }
+    if cli.command.is_none() {
+        return cmd_interactive().await;
     }
 
+    match cli.command.unwrap() {
+        Commands::Init { workspace } => cmd_init(&workspace),
+        Commands::Pipeline { subcommand } => match subcommand {
+            PipelineCommands::Run { pattern, path, no_review, no_code } => {
+                cmd_pipeline_run(&pattern, path.as_deref(), no_review, no_code).await
+            }
+        },
+        Commands::Ask { question } => cmd_ask(&question).await,
+        Commands::Serve { port } => cmd_serve(port).await,
+        Commands::Tools => cmd_tools(),
+        Commands::List => cmd_list().await,
+        Commands::Clear { yes } => cmd_clear(yes),
+        Commands::Status => cmd_status().await,
+    }
+}
+
+async fn cmd_interactive() -> anyhow::Result<()> {
+    for line in banner_lines() { println!("{}", line); }
+    println!();
+
+    let config = LabConfig::default();
+    let lab = ResearchLab::new(config.clone());
+    let status_str: String = if lab.has_llm() {
+        format!("● Connected ({})", config.model).green().to_string()
+    } else {
+        "○ Not configured".yellow().to_string()
+    };
+    println!("{} {}", "Model            ".dimmed(), config.model);
+    println!("{} {}", "Workspace        ".dimmed(), config.workspace.display());
+    println!("{} {}", "Provider         ".dimmed(), config.provider);
+    println!("{} {}", "LLM              ".dimmed(), status_str);
+    println!();
+    println!("{}", "─────────────────────────────────────────".dimmed());
+    println!("{} {} {} {}", "Type".dimmed(), "help".bold().cyan(), "for commands,".dimmed(),
+        "Ctrl+C to exit".dimmed());
+    println!("{}", "─────────────────────────────────────────".dimmed());
+    println!();
+
+    loop {
+        print!("❯ "); use std::io::Write; let _ = std::io::stdout().flush();
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).unwrap_or(0) == 0 { break; }
+        let input = input.trim().to_string();
+        if input.is_empty() { continue; }
+        if input == "exit" || input == "quit" || input == "q" {
+            println!(); println!("{}", "Goodbye 👋".dimmed()); break;
+        }
+        if input == "help" || input == "h" { print_help(); println!(); continue; }
+        if input == "status" { let _ = cmd_status().await; println!(); continue; }
+        if input == "tools" { let _ = cmd_tools(); println!(); continue; }
+        if input.starts_with("ask ") {
+            let q = &input[4..].trim().trim_matches('"');
+            if !q.is_empty() { let _ = cmd_ask(q).await; }
+            println!(); continue;
+        }
+        if input.starts_with("pipeline ") {
+            if let Err(e) = cmd_pipeline_run("**/*.py", None, false, false).await { eprintln!("{}", e); }
+            println!(); continue;
+        }
+        if input == "clear" { let _ = cmd_clear(false); println!(); continue; }
+        eprintln!("{} Unknown. Type {}.", "⚠".yellow(), "help".bold().yellow());
+        println!();
+    }
+    Ok(())
+}
+
+fn print_help() {
+    println!();
+    println!("{}", "╔═══════════════════════════════════════════╗".dimmed());
+    println!("{}         {}", "║".dimmed(), "Lab Interactive".bold().cyan());
+    println!("{}", "╠═══════════════════════════════════════════╣".dimmed());
+    println!("{}  {} {}", "║".dimmed(), "pipeline run [--pattern]".bold(), "Run pipeline".dimmed());
+    println!("{}  {} {}", "║".dimmed(), "ask \"question\"".bold(), "LLM code query".dimmed());
+    println!("{}  {} {}", "║".dimmed(), "status".bold(), "Lab status".dimmed());
+    println!("{}", "╚═══════════════════════════════════════════╝".dimmed());
+    println!();
+}
+
+fn cmd_init(workspace: &str) -> anyhow::Result<()> {
+    let ws = if workspace != "." {
+        let p = PathBuf::from(workspace); std::fs::create_dir_all(&p)?; p
+    } else { std::env::current_dir()? };
+    let config = LabConfig::with_workspace(ws.clone());
+    println!("{}", format!("Initialized workspace: {}", ws.display()).green().bold());
+    println!("\nWorkspace:  {}\nMemory:     {}\nOutputs:    {}",
+        config.full_path(&config.sessions_dir).display(),
+        config.full_path(&config.memory_dir).display(),
+        config.full_path(&config.outputs_dir).display());
+    println!("\nRun `lab` to start interactive mode.");
+    Ok(())
+}
+
+async fn cmd_pipeline_run(pattern: &str, _path: Option<&str>, no_review: bool, _no_code: bool) -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    let ws = config.workspace.clone();
+    let md = config.full_path(&config.memory_dir);
+    println!("🔬 {} Pipeline...", if no_review { "Quick" } else { "Full" });
+    let mut stages = vec!["discover".into(), "research".into(), "analyze".into()];
+    if !no_review { stages.push("review".into()); }
+    stages.push("summarize".into());
+    let pc = lab_pipelines::PipelineConfig {
+        name: "cli-pipeline".into(), stages, input_targets: vec![pattern.into()],
+        max_concurrent_stages: 1, fail_fast: true, retry_on_failure: false,
+        timeout_per_stage_secs: 1800, output_path: None, exclude_patterns: vec![],
+    };
+    let mut pipeline = lab_pipelines::ResearchPipeline::new(pc, "interactive".to_string());
+    let mut registry = lab_tools::ToolRegistry::new(ws);
+    registry.register_builtins();
+    let mut mem = lab_memory::MemoryWorkspace::new(md);
+    let result = pipeline.run(&mut registry, &mut mem, None, None).await;
+    println!("\n{}", "═══ Pipeline Results ═══".bold().cyan());
+    println!("Status: {}", match result.status.as_str() {
+        "completed" => "✅ Completed".green(), "failed" => "❌ Failed".red(), _ => "⚠️ Partial".yellow(),
+    });
+    for s in &result.stage_results {
+        let i = if matches!(s.status, lab_pipelines::StageStatus::Completed) { "✅" } else { "❌" };
+        println!("  {} {} ({:.1}s)", i, s.name.bold(), s.duration_secs);
+    }
+    println!("\nTotal: {:.1}s", result.total_duration_secs);
+    Ok(())
+}
+
+async fn cmd_ask(question: &str) -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    let ws = config.workspace.clone();
+    let lab = ResearchLab::new(config);
+    if !lab.has_llm() { eprintln!("{} LLM not configured. Set API key.", "❌".red()); return Ok(()); }
+    let mut ctx = format!("Project: {}\n\n", ws.display());
+    for f in &["Cargo.toml", "README.md"] {
+        if let Ok(c) = std::fs::read_to_string(ws.join(f)) {
+            let p = if c.len() > 2000 { &c[..2000] } else { &c };
+            ctx.push_str(&format!("=== {} ===\n{}\n\n", f, p));
+        }
+    }
+    if let Some(text) = lab.ask_llm(&format!("{}\n\nQ: {}", ctx, question), "Be concise.", 0.2, 1024).await {
+        println!("{}", text);
+    } else { eprintln!("{} No LLM response.", "❌".red()); }
+    Ok(())
+}
+
+async fn cmd_serve(port: u16) -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    config.ensure_directories();
+    let state = Arc::new(lab_api::AppState::new(config).await);
+    let router = lab_api::create_router(state.clone());
+    let addr = format!("0.0.0.0:{}", port);
+    println!("🌐 Server on {}", addr.bold().cyan());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+fn cmd_tools() -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    let lab = ResearchLab::new(config);
+    let tools = lab.tools().list_tools();
+    println!("{}", format!("═══ {} tools:", tools.len()).bold().yellow());
+    for t in &tools {
+        let n = t.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+        let d = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let c = t.get("category").and_then(|v| v.as_str()).unwrap_or("");
+        println!("  {} — {} [{}]", n.bold(), d, c);
+    }
+    Ok(())
+}
+
+async fn cmd_list() -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    let sd = config.full_path(&config.sessions_dir);
+    let count = if sd.exists() { std::fs::read_dir(&sd).map(|d| d.count()).unwrap_or(0) } else { 0 };
+    println!("{}", format!("═══ {} session(s)", count).bold().cyan());
+    Ok(())
+}
+
+fn cmd_clear(yes: bool) -> anyhow::Result<()> {
+    if yes {
+        let config = LabConfig::default();
+        let md = config.full_path(&config.memory_dir);
+        if md.exists() { std::fs::remove_dir_all(&md)?; }
+        std::fs::create_dir_all(&md)?;
+        println!("{} Cleared.", "✓".green().bold());
+    } else {
+        println!("{} Use `lab clear --yes`.", "⚠".yellow().bold());
+    }
+    Ok(())
+}
+
+async fn cmd_status() -> anyhow::Result<()> {
+    let config = LabConfig::default();
+    let lab = ResearchLab::new(config.clone());
+    println!("{}", "═══ AI Research Lab ═══".bold().cyan());
+    println!("{} {}", "Workspace:".dimmed(), lab.config.workspace.display());
+    println!("{} {} ({})", "Provider:".dimmed(), lab.config.provider, lab.config.model);
+    println!("{} {}", "Tools:".dimmed(), lab.tools().list_tools().len());
+    let sd = config.full_path(&config.sessions_dir);
+    let sc = if sd.exists() { std::fs::read_dir(&sd).map(|d| d.count()).unwrap_or(0) } else { 0 };
+    println!("{} {}", "Sessions:".dimmed(), sc);
+    println!("{} {}", "Memory:".dimmed(), lab.memory().entry_count());
+    println!("{} {}", "LLM:".dimmed(), if lab.has_llm() {
+        format!("✅ ({})", lab.config.model)
+    } else { "○ Not set".to_string() });
     Ok(())
 }
