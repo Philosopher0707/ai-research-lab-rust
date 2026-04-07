@@ -1,0 +1,55 @@
+[workspace]
+members = [
+  "crates/lab-core",
+  "crates/lab-memory",
+  "crates/lab-tools",
+  "crates/lab-permissions",
+  "crates/lab-agents",
+  "crates/lab-pipelines",
+  "crates/lab-reports",
+  "crates/lab-api",
+  "crates/lab-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[workspace.dependencies]
+lab-core = { path = "crates/lab-core" }
+lab-memory = { path = "crates/lab-memory" }
+lab-tools = { path = "crates/lab-tools" }
+lab-permissions = { path = "crates/lab-permissions" }
+lab-agents = { path = "crates/lab-agents" }
+lab-pipelines = { path = "crates/lab-pipelines" }
+lab-reports = { path = "crates/lab-reports" }
+lab-api = { path = "crates/lab-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "2"
+globset = "0.4"
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+colored = "2"
+walkdir = "2"
+futures = "0.3"
+toml = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+md-5 = "0.10"
+sha2 = "0.10"
+tempfile = "3"
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+tokio-tungstenite = "0.26"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }

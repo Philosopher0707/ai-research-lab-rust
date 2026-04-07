@@ -1,0 +1,25 @@
+[package]
+name = "lab-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+lab-agents.workspace = true
+lab-pipelines.workspace = true
+lab-reports.workspace = true
+lab-memory.workspace = true
+lab-tools.workspace = true
+lab-permissions.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+axum.workspace = true
+tokio-tungstenite.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+futures = "0.3"
+uuid.workspace = true
+chrono.workspace = true
