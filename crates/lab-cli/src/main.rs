@@ -1,5 +1,3 @@
-//! Lab CLI — Command-line interface for the AI Research Lab.
-
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use lab_api;
@@ -7,21 +5,31 @@ use lab_core::{LabConfig, ResearchLab};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-fn banner_lines() -> Vec<String> {
-    vec![
-        format!("{}  {}     ██╗     ███████╗██╗  ██╗ █████╗ ██╗  ██╗",
-            "██╗".cyan(), "██║".bold().cyan()),
-        format!("{}  {}     ██║     ██╔════╝██║  ██║██╔══██╗██║ ██╔╝",
-            "██║".cyan(), "██║".bold().cyan()),
-        format!("{}  {}     ██║     █████╗  ███████║███████║█████╔╝",
-            "██║".cyan(), "██║".bold().cyan()),
-        format!("{}  {}     ██║     ██╔══╝  ██╔══██║██╔══██║██╔═██╗",
-            "██║".cyan(), "██║".bold().cyan()),
-        format!("{}  ██║  ███████╗███████╗██║  ██║██║  ██║██║  ██╗",
-            "██║".cyan()),
-        format!("{}  ╚═╝  ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ Code 🧪",
-            "╚".cyan()),
-    ]
+fn banner() {
+    // L      A       B
+    // L     A A      B B
+    // L    A   A     B  B
+    // L    AAAAA     B BBB
+    // L    A   A     B   B
+    // LLLL A   A     BBBBB
+
+    for line in vec![
+        format!("{}   {}  {}",
+            "L".cyan().bold(), "A".cyan().bold(), "B".cyan().bold()),
+        format!("{}  {} {}      {} {}",
+            "L".cyan().bold(), "A".cyan(), "A".cyan(), "B".cyan(), "B".cyan()),
+        format!("{} {}   {}     {}  {}",
+            "L".cyan().bold(), "A".cyan(), "A".cyan(), "B".cyan().bold(), "B".cyan()),
+        format!("{} {} {} {}    {} {}",
+            "L".cyan().bold(), "A".cyan(), "A".cyan().bold(), "A".cyan(), "B".cyan().bold(), "B".cyan()),
+        format!("{} {}   {}     {}  {}",
+            "L".cyan().bold(), "A".cyan(), "A".cyan(), "B".cyan().bold(), "   B".cyan()),
+        format!("{} {}   {}     {} {} {}",
+            "L".cyan().bold(), "A".cyan(), "   A".cyan(), "B".cyan().bold(), "B".cyan(), "B".cyan()),
+    ] {
+        println!("{}", line);
+    }
+    println!("{} Code {}", "════".cyan().bold(), "🧪".cyan());
 }
 
 #[derive(Parser)]
@@ -40,8 +48,14 @@ enum Commands {
     },
     /// Run a full research pipeline
     Pipeline {
-        #[command(subcommand)]
-        subcommand: PipelineCommands,
+        #[arg(long, default_value = "**/*.py")]
+        pattern: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long, default_value = "false")]
+        no_review: bool,
+        #[arg(long, default_value = "false")]
+        no_code: bool,
     },
     /// Ask a question about your codebase using LLM
     Ask {
@@ -65,36 +79,33 @@ enum Commands {
     Status,
 }
 
-#[derive(Subcommand)]
-enum PipelineCommands {
-    /// Run a full research pipeline
-    Run {
-        #[arg(long, default_value = "**/*.py")]
-        pattern: String,
-        #[arg(long)]
-        path: Option<String>,
-        #[arg(long, default_value = "false")]
-        no_review: bool,
-        #[arg(long, default_value = "false")]
-        no_code: bool,
-    },
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Check if any CLI flag like --help or --version is present
+    let args: Vec<String> = std::env::args().collect();
+    let wants_help = args.iter().any(|a| a == "--help" || a == "-h");
+    let wants_version = args.iter().any(|a| a == "--version" || a == "-V");
+
+    if wants_help {
+        Cli::parse(); // clap will print help and exit
+        return Ok(());
+    }
+    if wants_version {
+        Cli::parse(); // clap will print version and exit
+        return Ok(());
+    }
+
     let cli = Cli::parse();
 
     if cli.command.is_none() {
-        return cmd_interactive().await;
+        return cmd_chat().await;
     }
 
     match cli.command.unwrap() {
         Commands::Init { workspace } => cmd_init(&workspace),
-        Commands::Pipeline { subcommand } => match subcommand {
-            PipelineCommands::Run { pattern, path, no_review, no_code } => {
-                cmd_pipeline_run(&pattern, path.as_deref(), no_review, no_code).await
-            }
-        },
+        Commands::Pipeline { pattern, path, no_review, no_code } => {
+            cmd_pipeline_run(&pattern, path.as_deref(), no_review, no_code).await
+        }
         Commands::Ask { question } => cmd_ask(&question).await,
         Commands::Serve { port } => cmd_serve(port).await,
         Commands::Tools => cmd_tools(),
@@ -104,66 +115,69 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn cmd_interactive() -> anyhow::Result<()> {
-    for line in banner_lines() { println!("{}", line); }
+async fn cmd_chat() -> anyhow::Result<()> {
+    banner();
     println!();
 
     let config = LabConfig::default();
     let lab = ResearchLab::new(config.clone());
+
     let status_str: String = if lab.has_llm() {
         format!("● Connected ({})", config.model).green().to_string()
     } else {
         "○ Not configured".yellow().to_string()
     };
-    println!("{} {}", "Model            ".dimmed(), config.model);
-    println!("{} {}", "Workspace        ".dimmed(), config.workspace.display());
-    println!("{} {}", "Provider         ".dimmed(), config.provider);
-    println!("{} {}", "LLM              ".dimmed(), status_str);
+
+    println!("{} {}", "  Model:".dimmed(), config.model.dimmed());
+    println!("{} {}", "  LLM:".dimmed(), status_str);
     println!();
-    println!("{}", "─────────────────────────────────────────".dimmed());
-    println!("{} {} {} {}", "Type".dimmed(), "help".bold().cyan(), "for commands,".dimmed(),
-        "Ctrl+C to exit".dimmed());
-    println!("{}", "─────────────────────────────────────────".dimmed());
+    println!("{}", "  Just type your question — no prefix needed.".dimmed());
+    println!("{} /help    /status    /pipeline    /exit", "  ".dimmed());
+    println!("{}", "═══════════════════════════════════════════".dimmed());
     println!();
 
     loop {
-        print!("❯ "); use std::io::Write; let _ = std::io::stdout().flush();
+        print!("❯ ");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).unwrap_or(0) == 0 { break; }
         let input = input.trim().to_string();
         if input.is_empty() { continue; }
-        if input == "exit" || input == "quit" || input == "q" {
+
+        if input == "/exit" || input == "/quit" || input == "/q" {
             println!(); println!("{}", "Goodbye 👋".dimmed()); break;
         }
-        if input == "help" || input == "h" { print_help(); println!(); continue; }
-        if input == "status" { let _ = cmd_status().await; println!(); continue; }
-        if input == "tools" { let _ = cmd_tools(); println!(); continue; }
-        if input.starts_with("ask ") {
-            let q = &input[4..].trim().trim_matches('"');
-            if !q.is_empty() { let _ = cmd_ask(q).await; }
-            println!(); continue;
+        if input == "/help" || input == "/?" {
+            println!();
+            println!("  /help        ─ Show available commands");
+            println!("  /status      ─ Show lab workspace status");
+            println!("  /pipeline    ─ Run code scan on current dir");
+            println!("  /exit        ─ Quit");
+            println!("  [message]    ─ Ask AI about your codebase");
+            println!();
+            continue;
         }
-        if input.starts_with("pipeline ") {
-            if let Err(e) = cmd_pipeline_run("**/*.py", None, false, false).await { eprintln!("{}", e); }
-            println!(); continue;
+        if input == "/status" {
+            let _ = cmd_status().await;
+            println!();
+            continue;
         }
-        if input == "clear" { let _ = cmd_clear(false); println!(); continue; }
-        eprintln!("{} Unknown. Type {}.", "⚠".yellow(), "help".bold().yellow());
+        if input == "/pipeline" {
+            let _ = cmd_pipeline_run("**/*.*", None, false, false).await;
+            println!();
+            continue;
+        }
+
+        // Direct chat — send to LLM
+        if lab.has_llm() {
+            if let Err(e) = cmd_ask(&input).await { eprintln!("{} {}", "❌".red(), e); }
+        } else {
+            eprintln!("{} LLM not configured. Set API key in .zshrc.", "⚠".yellow());
+        }
         println!();
     }
     Ok(())
-}
-
-fn print_help() {
-    println!();
-    println!("{}", "╔═══════════════════════════════════════════╗".dimmed());
-    println!("{}         {}", "║".dimmed(), "Lab Interactive".bold().cyan());
-    println!("{}", "╠═══════════════════════════════════════════╣".dimmed());
-    println!("{}  {} {}", "║".dimmed(), "pipeline run [--pattern]".bold(), "Run pipeline".dimmed());
-    println!("{}  {} {}", "║".dimmed(), "ask \"question\"".bold(), "LLM code query".dimmed());
-    println!("{}  {} {}", "║".dimmed(), "status".bold(), "Lab status".dimmed());
-    println!("{}", "╚═══════════════════════════════════════════╝".dimmed());
-    println!();
 }
 
 fn cmd_init(workspace: &str) -> anyhow::Result<()> {
@@ -172,11 +186,11 @@ fn cmd_init(workspace: &str) -> anyhow::Result<()> {
     } else { std::env::current_dir()? };
     let config = LabConfig::with_workspace(ws.clone());
     println!("{}", format!("Initialized workspace: {}", ws.display()).green().bold());
-    println!("\nWorkspace:  {}\nMemory:     {}\nOutputs:    {}",
+    println!("\nWorkspace:   {}\nMemory:      {}\nOutputs:     {}",
         config.full_path(&config.sessions_dir).display(),
         config.full_path(&config.memory_dir).display(),
         config.full_path(&config.outputs_dir).display());
-    println!("\nRun `lab` to start interactive mode.");
+    println!("\nRun `lab` to start chat mode.");
     Ok(())
 }
 
@@ -193,7 +207,7 @@ async fn cmd_pipeline_run(pattern: &str, _path: Option<&str>, no_review: bool, _
         max_concurrent_stages: 1, fail_fast: true, retry_on_failure: false,
         timeout_per_stage_secs: 1800, output_path: None, exclude_patterns: vec![],
     };
-    let mut pipeline = lab_pipelines::ResearchPipeline::new(pc, "interactive".to_string());
+    let mut pipeline = lab_pipelines::ResearchPipeline::new(pc, "pipeline".to_string());
     let mut registry = lab_tools::ToolRegistry::new(ws);
     registry.register_builtins();
     let mut mem = lab_memory::MemoryWorkspace::new(md);
@@ -214,17 +228,19 @@ async fn cmd_ask(question: &str) -> anyhow::Result<()> {
     let config = LabConfig::default();
     let ws = config.workspace.clone();
     let lab = ResearchLab::new(config);
-    if !lab.has_llm() { eprintln!("{} LLM not configured. Set API key.", "❌".red()); return Ok(()); }
+    if !lab.has_llm() { eprintln!("{} LLM not configured.", "❌".red()); return Ok(()); }
     let mut ctx = format!("Project: {}\n\n", ws.display());
-    for f in &["Cargo.toml", "README.md"] {
+    for f in &["Cargo.toml", "README.md", "DESIGN.md"] {
         if let Ok(c) = std::fs::read_to_string(ws.join(f)) {
             let p = if c.len() > 2000 { &c[..2000] } else { &c };
             ctx.push_str(&format!("=== {} ===\n{}\n\n", f, p));
         }
     }
-    if let Some(text) = lab.ask_llm(&format!("{}\n\nQ: {}", ctx, question), "Be concise.", 0.2, 1024).await {
+    if let Some(text) = lab.ask_llm(&format!("{}\n\nQ: {}", ctx, question), "Be concise and direct.", 0.2, 1024).await {
         println!("{}", text);
-    } else { eprintln!("{} No LLM response.", "❌".red()); }
+    } else {
+        eprintln!("{} No LLM response.", "❌".red());
+    }
     Ok(())
 }
 
