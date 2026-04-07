@@ -6,6 +6,7 @@ use crate::researcher::ResearcherAgent;
 use crate::reviewer::ReviewerAgent;
 use crate::summarizer::SummarizerAgent;
 use lab_core::types::AgentResult;
+use lab_core::llm::LLMClient;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,8 @@ impl MultiAgentCollaborator {
         memory: &mut MemoryWorkspace,
         pattern: Option<&str>,
         path: Option<&str>,
+        llm: Option<&dyn LLMClient>,
+        model: Option<&str>,
     ) -> WorkflowResult {
         let start = Instant::now();
         self.status = status::RUNNING.to_string();
@@ -113,7 +116,7 @@ impl MultiAgentCollaborator {
         // Phase 1: Research — always runs
         let phase_start = Instant::now();
         let research_result = researcher
-            .execute(registry, memory, "analyze codebase", pattern, path, None)
+            .execute(registry, memory, "analyze codebase", pattern, path, None, llm, model)
             .await;
 
         phases.push(PhaseResult {
@@ -143,7 +146,7 @@ impl MultiAgentCollaborator {
             );
 
             let review_result = reviewer
-                .execute(registry, memory, "review code quality", pattern, path, None)
+                .execute(registry, memory, "review code quality", pattern, path, None, llm, model)
                 .await;
 
             phases.push(PhaseResult {
@@ -171,7 +174,7 @@ impl MultiAgentCollaborator {
             );
 
             let code_result = coder
-                .execute(registry, memory, "generate boilerplate", None, None, Some("module"))
+                .execute(registry, memory, "generate boilerplate", None, None, Some("module"), None, None)
                 .await;
 
             phases.push(PhaseResult {
@@ -195,7 +198,7 @@ impl MultiAgentCollaborator {
             );
 
             let summary_result = summarizer
-                .execute(registry, memory, "generate summary", Some("lab-outputs/collaboration-summary.md"))
+                .execute(registry, memory, "generate summary", Some("lab-outputs/collaboration-summary.md"), None, None)
                 .await;
 
             phases.push(PhaseResult {

@@ -2,6 +2,7 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
+use lab_core::llm::LLMClient;
 use lab_core::types::AgentResult;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -36,6 +37,8 @@ impl CoderAgent {
         path: Option<&str>,
         content: Option<&str>,
         template: Option<&str>,
+        _llm: Option<&dyn lab_core::llm::LLMClient>,
+        _model: Option<&str>,
     ) -> AgentResult {
         if let Err(e) = self.impl_.start().await {
             return AgentResult::fail(e.to_string(), None);

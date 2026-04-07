@@ -1,7 +1,9 @@
 //! ResearcherAgent — discovers and analyses codebase structure.
+//! With optional LLM for intelligent architecture analysis.
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
+use lab_core::llm::{ChatMessage, LLMClient};
 use lab_core::types::{AgentResult, AgentState};
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -32,7 +34,10 @@ impl ResearcherAgent {
     pub fn session_id(&self) -> &str { self.impl_.session_id() }
     pub fn state(&self) -> AgentState { self.impl_.state() }
 
-    /// Execute the research task: discover files, read them, build structure map.
+    /// Execute the research task with optional LLM intelligence.
+    /// 
+    /// Without LLM: discovers files, counts classes/functions (heuristic)
+    /// With LLM: additionally analyzes architecture, patterns, and dependencies
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,
@@ -41,6 +46,9 @@ impl ResearcherAgent {
         pattern: Option<&str>,
         path: Option<&str>,
         file_limit: Option<usize>,
+        // Optional LLM support
+        llm: Option<&dyn LLMClient>,
+        model: Option<&str>,
     ) -> AgentResult {
         if let Err(e) = self.impl_.start().await {
             return AgentResult::fail(e.to_string(), None);
@@ -175,10 +183,89 @@ impl ResearcherAgent {
             "total_functions": total_functions,
         });
 
+        // ─── LLM Enhancement (if available) ──────────────
+        let mut llm_analysis: Option<serde_json::Value> = None;
+        if let (Some(llm), Some(model)) = (llm, model) {
+            // Pick top 2 files for LLM analysis (keep it under ~30s)
+            let top_files: Vec<_> = file_details.iter().take(2).collect();
+            let mut file_summaries = Vec::new();
+            
+            for fdata in &top_files {
+                if let Some(fp) = fdata.get("path").and_then(|v| v.as_str()) {
+                    // Read more content for LLM — limit to 1500 chars
+                    let content_result = registry.execute("read_file", &HashMap::from([
+                        ("path".into(), serde_json::json!(fp)),
+                        ("limit".into(), serde_json::json!(300)),
+                    ])).await;
+                    
+                    if content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        if let Some(content) = content_result.get("data").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                            let truncated = if content.len() > 1500 {
+                                let end = content.char_indices()
+                                    .take_while(|(idx, _)| *idx < 1500)
+                                    .last()
+                                    .map(|(idx, c)| idx + c.len_utf8())
+                                    .unwrap_or(content.len());
+                                &content[..end]
+                            } else { content };
+                            
+                            let prompt = format!(
+                                "Briefly describe this file's purpose and key patterns (max 3 sentences).\n\
+                                 File: {}\n\n{}", fp, truncated
+                            );
+                            
+                            match llm.chat(
+                                vec![ChatMessage::user(prompt)],
+                                model, 0.1, 256
+                            ).await {
+                                Ok(resp) => {
+                                    file_summaries.push(serde_json::json!({
+                                        "path": fp,
+                                        "llm_analysis": resp.content,
+                                    }));
+                                }
+                                Err(e) => {
+                                    tracing::warn!("LLM analysis failed for {}: {}", fp, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !file_summaries.is_empty() {
+                llm_analysis = Some(serde_json::json!({
+                    "llm_file_analyses": file_summaries,
+                    "method": "llm_enhanced",
+                }));
+            }
+        }
+
+        let final_results = if let Some(llm) = llm_analysis {
+            serde_json::json!({
+                "task": task,
+                "total_files": total_files,
+                "files_analysed": file_details.len(),
+                "files": file_details,
+                "total_classes": total_classes,
+                "total_functions": total_functions,
+                "llm_analysis": llm,
+            })
+        } else {
+            serde_json::json!({
+                "task": task,
+                "total_files": total_files,
+                "files_analysed": file_details.len(),
+                "files": file_details,
+                "total_classes": total_classes,
+                "total_functions": total_functions,
+            })
+        };
+
         self.impl_
-            .write_memory(memory, "researcher_map", &results, None);
+            .write_memory(memory, "researcher_map", &final_results, None);
         self.impl_.cleanup().await;
 
-        AgentResult::ok(results)
+        AgentResult::ok(final_results)
     }
 }

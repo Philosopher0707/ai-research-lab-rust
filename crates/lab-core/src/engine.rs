@@ -320,6 +320,16 @@ impl ResearchLab {
         self.llm_client.is_some() && !self.config.api_key.is_empty()
     }
 
+    /// Get a reference to the LLM client (borrowed).
+    pub fn llm_client(&self) -> Option<&dyn LLMClient> {
+        self.llm_client.as_ref().map(|c| c.as_ref())
+    }
+
+    /// Get the configured model name.
+    pub fn model(&self) -> &str {
+        &self.config.model
+    }
+
     /// Get the LLM error from the last operation (for debugging).
     pub fn llm_error(&self) -> Option<&str> {
         None  // Placeholder for future error tracking

@@ -41,7 +41,7 @@ impl LlmResearcherAgent {
         file_limit: Option<usize>,
     ) -> AgentResult {
         // Step 1: Run heuristic research
-        let result = self.base.execute(registry, memory, task, pattern, path, file_limit).await;
+        let result = self.base.execute(registry, memory, task, pattern, path, file_limit, None, None).await;
         if !result.success {
             return result;
         }
@@ -119,7 +119,7 @@ impl LlmReviewerAgent {
         path: Option<&str>,
         file_limit: Option<usize>,
     ) -> AgentResult {
-        let result = self.base.execute(registry, memory, task, pattern, path, file_limit).await;
+        let result = self.base.execute(registry, memory, task, pattern, path, file_limit, None, None).await;
         if !result.success {
             return result;
         }
@@ -192,7 +192,7 @@ impl LlmSummarizerAgent {
         output_path: Option<&str>,
     ) -> AgentResult {
         // Run heuristic summary first
-        let result = self.base.execute(registry, memory, task, output_path).await;
+        let result = self.base.execute(registry, memory, task, output_path, None, None).await;
         if !result.success {
             return result;
         }

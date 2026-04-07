@@ -1,0 +1,30 @@
+{
+  "pipeline_analyze": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.487233+00:00"
+  },
+  "review_results": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.487009+00:00"
+  },
+  "pipeline_discover": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.399973+00:00"
+  },
+  "pipeline_research": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.487138+00:00"
+  },
+  "summary": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.530389+00:00"
+  },
+  "pipeline_summarize": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.530482+00:00"
+  },
+  "researcher_map": {
+    "scope": "session",
+    "updated": "2026-04-07T11:45:51.530090+00:00"
+  }
+}

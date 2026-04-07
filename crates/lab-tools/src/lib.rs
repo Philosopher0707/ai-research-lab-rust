@@ -200,9 +200,27 @@ impl Tool for GlobTool {
         let Ok(globset) = builder.build() else {
             return ToolResult::err("Invalid glob pattern", start);
         };
+        let max_files = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(500) as usize;
         let mut matches = Vec::new();
         if search_path.exists() && search_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&search_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(&search_path)
+                .max_depth(12)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if matches.len() >= max_files {
+                    break;
+                }
+                // Skip common noise directories
+                if let Some(name) = entry.file_name().to_str() {
+                    if matches!(name, ".git" | ".hg" | ".svn" | "node_modules" | ".cargo" | ".rustup" | "__pycache__" | ".nvm") {
+                        continue;
+                    }
+                    if name.starts_with('.') && entry.file_type().is_dir() {
+                        continue;
+                    }
+                }
                 if entry.file_type().is_file() {
                     let path = entry.path();
                     if let Ok(rel) = path.strip_prefix(&search_path) {
@@ -214,7 +232,14 @@ impl Tool for GlobTool {
                 }
             }
         }
-        ToolResult::ok(serde_json::json!({"matches": matches, "count": matches.len()}), start)
+        let truncated = matches.len() > max_files;
+        matches.truncate(max_files);
+        let result = serde_json::json!({
+            "matches": matches,
+            "count": matches.len(),
+            "truncated": truncated,
+        });
+        ToolResult::ok(result, start)
     }
 }
 

@@ -73,6 +73,9 @@ enum PipelineCommands {
         /// Disable code generation
         #[arg(long, default_value = "false")]
         no_code: bool,
+        /// Enable LLM analysis (adds ~5-10s)
+        #[arg(long, default_value = "false")]
+        llm: bool,
     },
 }
 
@@ -96,51 +99,61 @@ async fn main() -> anyhow::Result<()> {
                     .green()
                     .bold()
             );
-            println!();
+
             println!(
                 "Workspace dirs:  {}  Memory: {}  Outputs: {}",
                 config.full_path(&config.sessions_dir).display(),
                 config.full_path(&config.memory_dir).display(),
                 config.full_path(&config.outputs_dir).display(),
             );
-            println!();
+
             println!("Run `lab pipeline run` to start a full research task.");
         }
 
         Commands::Pipeline { subcommand } => match subcommand {
-            PipelineCommands::Run { pattern, path, no_review, no_code } => {
-                println!("{} Starting Pipeline: ...", "▶".cyan().bold());
-                println!();
-
+            PipelineCommands::Run { pattern, path, no_review, no_code, llm } => {
                 let config = LabConfig::default();
                 let workspace = config.workspace.clone();
                 let memory_dir = config.full_path(&config.memory_dir);
                 let mut lab = ResearchLab::new(config);
-                lab.start().await?;
 
                 let session = lab.create_session("pipeline-run").await?;
-                let session_id = session.id.clone();
+                let session_id = "pipeline-run".to_string();
 
                 // Create fresh components for pipeline
                 let mut registry = lab_tools::ToolRegistry::new(workspace);
                 registry.register_builtins();
                 let mut mem = lab_memory::MemoryWorkspace::new(memory_dir);
-
+                // Build stages based on flags
+                let mut pipeline_stages = vec!["discover".into(), "research".into(), "analyze".into()];
+                if !no_code {
+                    pipeline_stages.push("code".into());
+                }
+                if !no_review {
+                    pipeline_stages.push("review".into());
+                }
+                pipeline_stages.push("summarize".into());
+                
+                let pipeline_config = lab_pipelines::PipelineConfig {
+                    name: "cli-pipeline".to_string(),
+                    stages: pipeline_stages,
+                    input_targets: vec![pattern.clone()],
+                    max_concurrent_stages: 1,
+                    fail_fast: true,
+                    retry_on_failure: false,
+                    timeout_per_stage_secs: 1800,
+                    output_path: None,
+                    exclude_patterns: vec![],
+                };
                 let mut pipeline = lab_pipelines::ResearchPipeline::new(
-                    lab_pipelines::PipelineConfig::default()
-                        .with_name("cli-pipeline")
-                        .with_stages(vec![
-                            "discover".into(),
-                            "research".into(),
-                            "analyze".into(),
-                            "summarize".into(),
-                        ]),
+                    pipeline_config,
                     session_id.clone(),
                 );
 
-                let result = pipeline.run(&mut registry, &mut mem).await;
+                // Disable LLM in pipeline for speed (use 'lab ask' for AI queries)
+                let result = pipeline.run(&mut registry, &mut mem, None, None).await;
 
-                println!();
+                // Print results before cleanup
                 println!("{}", "═══ Pipeline Results ═══".bold().cyan());
                 println!("Status: {}", match result.status.as_str() {
                     "completed" => "✅ Completed".green(),
@@ -154,10 +167,10 @@ async fn main() -> anyhow::Result<()> {
                         println!("    {}", e.red().dimmed());
                     }
                 }
-                println!();
-                println!("Total Duration: {:.1}s", result.total_duration_secs);
+    
+                let result = pipeline.run(&mut registry, &mut mem, None, None).await;
 
-                lab.close_session(&session_id).await?;
+                let _ = lab.shutdown().await;
                 lab.shutdown().await?;
             }
         },
@@ -165,7 +178,7 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Ask { question } => {
             println!("{} {}", "🤔 Asking LLM:".cyan().bold(), question);
-            println!();
+
             
             let config = LabConfig::default();
             let workspace = config.workspace.clone();
@@ -244,7 +257,7 @@ async fn main() -> anyhow::Result<()> {
             println!("  GET  /memory/:id");
             println!("  POST /pipelines/run");
             println!("  WS   /events (Real-time logs)");
-            println!();
+
 
             let listener = tokio::net::TcpListener::bind(&addr).await?;
             axum::serve(listener, router).await?;
