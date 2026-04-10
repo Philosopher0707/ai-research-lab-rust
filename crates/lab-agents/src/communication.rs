@@ -20,7 +20,9 @@ pub enum MessageType {
     Error,
 }
 
-fn default_instant() -> Instant { Instant::now() }
+fn default_instant() -> Instant {
+    Instant::now()
+}
 
 // ─── AgentMessage ───────────────────────────────────────────
 
@@ -112,7 +114,10 @@ impl AgentMailbox {
         }
     }
 
-    pub async fn send(&self, msg: AgentMessage) -> Result<(), mpsc::error::SendError<AgentMessage>> {
+    pub async fn send(
+        &self,
+        msg: AgentMessage,
+    ) -> Result<(), mpsc::error::SendError<AgentMessage>> {
         self.tx.send(msg.clone()).await?;
         let mut hist = self.history.lock().await;
         hist.push(msg);
@@ -125,12 +130,7 @@ impl AgentMailbox {
 
     pub async fn receive(&self, timeout_secs: u64) -> Option<AgentMessage> {
         let mut rx = self.rx.lock().await;
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            rx.recv(),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), rx.recv()).await {
             Ok(Some(msg)) if !msg.is_expired() => Some(msg),
             Ok(_) => None,
             Err(_) => None, // timeout
@@ -142,13 +142,15 @@ impl AgentMailbox {
         hist.iter()
             .rev()
             .take(limit)
-            .map(|m| serde_json::json!({
-                "msg_id": m.msg_id,
-                "sender_id": m.sender_id,
-                "sender_role": m.sender_role,
-                "type": format!("{:?}", m.msg_type).to_lowercase(),
-                "reply_to": m.reply_to,
-            }))
+            .map(|m| {
+                serde_json::json!({
+                    "msg_id": m.msg_id,
+                    "sender_id": m.sender_id,
+                    "sender_role": m.sender_role,
+                    "type": format!("{:?}", m.msg_type).to_lowercase(),
+                    "reply_to": m.reply_to,
+                })
+            })
             .collect()
     }
 }
@@ -175,22 +177,13 @@ impl AgentCommunicator {
     }
 
     /// Create and register a mailbox for an agent.
-    pub fn create_mailbox(
-        &mut self,
-        agent_id: String,
-        capacity: usize,
-        max_history: usize,
-    ) {
+    pub fn create_mailbox(&mut self, agent_id: String, capacity: usize, max_history: usize) {
         let mailbox = AgentMailbox::new(&agent_id, capacity, max_history);
         self.mailboxes.insert(agent_id, mailbox);
     }
 
     /// Send a message to a specific agent.
-    pub async fn send_to(
-        &self,
-        recipient_id: &str,
-        msg: AgentMessage,
-    ) -> Result<(), String> {
+    pub async fn send_to(&self, recipient_id: &str, msg: AgentMessage) -> Result<(), String> {
         if let Some(mailbox) = self.mailboxes.get(recipient_id) {
             mailbox.send(msg).await.map_err(|e| e.to_string())
         } else {

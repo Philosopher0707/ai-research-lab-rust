@@ -11,7 +11,10 @@ pub enum LabError {
     SessionExists(String),
 
     #[error("Agent not found: {agent_id} in session {session_id}")]
-    AgentNotFound { agent_id: String, session_id: String },
+    AgentNotFound {
+        agent_id: String,
+        session_id: String,
+    },
 
     #[error("Permission denied: {reason}")]
     PermissionDenied { reason: String },

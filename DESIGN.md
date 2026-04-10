@@ -2,6 +2,23 @@
 
 > Full parity design document mapping the Python AI Research Lab (`~/research/ai-research-lab`) to its Rust port (`~/archived/ai-research-lab-rust`).
 
+## Current Runtime Map
+
+For the implementation-accurate command flow, runtime wiring, and subsystem map of the code that exists today, see [`RUNTIME_MAP.md`](RUNTIME_MAP.md).
+
+Use this file for:
+
+- parity targets
+- planned crate architecture
+- roadmap and gap analysis
+
+Use `RUNTIME_MAP.md` for:
+
+- actual CLI command flow
+- current `ResearchLab` wiring
+- API routing and WebSocket event flow
+- real pipeline and LLM execution paths
+
 ---
 
 ## 1. Dependency Graph Analysis

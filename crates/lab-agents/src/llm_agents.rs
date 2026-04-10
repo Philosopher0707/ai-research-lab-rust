@@ -24,12 +24,22 @@ pub struct LlmResearcherAgent {
 
 impl LlmResearcherAgent {
     pub fn new(base: ResearcherAgent, client: Box<dyn LLMClient>, model: String) -> Self {
-        Self { base, client, model }
+        Self {
+            base,
+            client,
+            model,
+        }
     }
 
-    pub fn id(&self) -> &str { self.base.id() }
-    pub fn session_id(&self) -> &str { self.base.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.base.state() }
+    pub fn id(&self) -> &str {
+        self.base.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.base.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.base.state()
+    }
 
     pub async fn execute(
         &mut self,
@@ -41,7 +51,12 @@ impl LlmResearcherAgent {
         file_limit: Option<usize>,
     ) -> AgentResult {
         // Step 1: Run heuristic research
-        let result = self.base.execute(registry, memory, task, pattern, path, file_limit, None, None).await;
+        let result = self
+            .base
+            .execute(
+                registry, memory, task, pattern, path, file_limit, None, None,
+            )
+            .await;
         if !result.success {
             return result;
         }
@@ -51,15 +66,34 @@ impl LlmResearcherAgent {
             let mut llm_findings = Vec::new();
             for file_info in files.iter().take(5) {
                 if let Some(fp) = file_info.get("path").and_then(|v| v.as_str()) {
-                    let content_result = registry.execute("read_file", &HashMap::from([
-                        ("path".into(), serde_json::json!(fp)),
-                    ])).await;
+                    let content_result = registry
+                        .execute(
+                            "read_file",
+                            &HashMap::from([("path".into(), serde_json::json!(fp))]),
+                        )
+                        .await;
 
-                    if content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        if let Some(content) = content_result.get("data").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
-                            let truncated = if content.len() > 4000 { &content[..4000] } else { content };
+                    if content_result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        if let Some(content) = content_result
+                            .get("data")
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            let truncated = if content.len() > 4000 {
+                                &content[..4000]
+                            } else {
+                                content
+                            };
                             let prompt = format!("Analyze this file and describe its purpose and key patterns. File: {fp}\n\n{truncated}");
-                            match self.client.chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 1024).await {
+                            match self
+                                .client
+                                .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 1024)
+                                .await
+                            {
                                 Ok(response) => {
                                     llm_findings.push(serde_json::json!({
                                         "path": fp,
@@ -103,12 +137,22 @@ pub struct LlmReviewerAgent {
 
 impl LlmReviewerAgent {
     pub fn new(base: ReviewerAgent, client: Box<dyn LLMClient>, model: String) -> Self {
-        Self { base, client, model }
+        Self {
+            base,
+            client,
+            model,
+        }
     }
 
-    pub fn id(&self) -> &str { self.base.id() }
-    pub fn session_id(&self) -> &str { self.base.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.base.state() }
+    pub fn id(&self) -> &str {
+        self.base.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.base.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.base.state()
+    }
 
     pub async fn execute(
         &mut self,
@@ -119,7 +163,12 @@ impl LlmReviewerAgent {
         path: Option<&str>,
         file_limit: Option<usize>,
     ) -> AgentResult {
-        let result = self.base.execute(registry, memory, task, pattern, path, file_limit, None, None).await;
+        let result = self
+            .base
+            .execute(
+                registry, memory, task, pattern, path, file_limit, None, None,
+            )
+            .await;
         if !result.success {
             return result;
         }
@@ -128,14 +177,29 @@ impl LlmReviewerAgent {
             let mut llm_reviews = Vec::new();
             for review in reviews.iter().take(3) {
                 if let Some(fp) = review.get("path").and_then(|v| v.as_str()) {
-                    let content_result = registry.execute("read_file", &HashMap::from([
-                        ("path".into(), serde_json::json!(fp)),
-                    ])).await;
+                    let content_result = registry
+                        .execute(
+                            "read_file",
+                            &HashMap::from([("path".into(), serde_json::json!(fp))]),
+                        )
+                        .await;
 
-                    if content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        if let Some(content) = content_result.get("data").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                    if content_result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        if let Some(content) = content_result
+                            .get("data")
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
                             let prompt = format!("Review this code for quality and best practices. File: {fp}\n\n{content}");
-                            match self.client.chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048).await {
+                            match self
+                                .client
+                                .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+                                .await
+                            {
                                 Ok(response) => {
                                     llm_reviews.push(serde_json::json!({
                                         "path": fp,
@@ -177,12 +241,22 @@ pub struct LlmSummarizerAgent {
 
 impl LlmSummarizerAgent {
     pub fn new(base: SummarizerAgent, client: Box<dyn LLMClient>, model: String) -> Self {
-        Self { base, client, model }
+        Self {
+            base,
+            client,
+            model,
+        }
     }
 
-    pub fn id(&self) -> &str { self.base.id() }
-    pub fn session_id(&self) -> &str { self.base.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.base.state() }
+    pub fn id(&self) -> &str {
+        self.base.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.base.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.base.state()
+    }
 
     pub async fn execute(
         &mut self,
@@ -192,7 +266,10 @@ impl LlmSummarizerAgent {
         output_path: Option<&str>,
     ) -> AgentResult {
         // Run heuristic summary first
-        let result = self.base.execute(registry, memory, task, output_path, None, None).await;
+        let result = self
+            .base
+            .execute(registry, memory, task, output_path, None, None)
+            .await;
         if !result.success {
             return result;
         }
@@ -200,10 +277,16 @@ impl LlmSummarizerAgent {
         // LLM synthesis — gather data and ask LLM
         let mut context = String::new();
         if let Some(r) = memory.get(self.base.session_id(), "researcher_map") {
-            context.push_str(&format!("Research:\n{}\n\n", serde_json::to_string_pretty(&r).unwrap_or_default()));
+            context.push_str(&format!(
+                "Research:\n{}\n\n",
+                serde_json::to_string_pretty(&r).unwrap_or_default()
+            ));
         }
         if let Some(r) = memory.get(self.base.session_id(), "review_results") {
-            context.push_str(&format!("Review:\n{}\n\n", serde_json::to_string_pretty(&r).unwrap_or_default()));
+            context.push_str(&format!(
+                "Review:\n{}\n\n",
+                serde_json::to_string_pretty(&r).unwrap_or_default()
+            ));
         }
 
         if context.is_empty() {
@@ -211,13 +294,22 @@ impl LlmSummarizerAgent {
         }
 
         let prompt = format!("Synthesize these findings into a concise executive summary (max 500 words).\n\n{context}");
-        match self.client.chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048).await {
+        match self
+            .client
+            .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+            .await
+        {
             Ok(response) => {
                 let enhanced_path = output_path.unwrap_or("lab-outputs/llm-summary.md");
-                registry.execute("write_file", &HashMap::from([
-                    ("path".into(), serde_json::json!(enhanced_path)),
-                    ("content".into(), serde_json::json!(&response.content)),
-                ])).await;
+                registry
+                    .execute(
+                        "write_file",
+                        &HashMap::from([
+                            ("path".into(), serde_json::json!(enhanced_path)),
+                            ("content".into(), serde_json::json!(&response.content)),
+                        ]),
+                    )
+                    .await;
 
                 AgentResult::ok(serde_json::json!({
                     "task": task,

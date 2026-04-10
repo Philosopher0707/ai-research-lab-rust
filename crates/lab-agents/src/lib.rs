@@ -17,6 +17,7 @@ pub mod communication;
 pub mod llm_agents;
 pub mod researcher;
 pub mod reviewer;
+pub mod runtime;
 pub mod summarizer;
 
 pub use base::AgentImpl;
@@ -25,4 +26,31 @@ pub use collaborator::MultiAgentCollaborator;
 pub use communication::{AgentCommunicator, AgentMessage, MessageType};
 pub use researcher::ResearcherAgent;
 pub use reviewer::ReviewerAgent;
+pub use runtime::{execute_agent, supported_agent_types, AgentExecutionRequest};
 pub use summarizer::SummarizerAgent;
+
+/// Shared one-shot LLM helper used by all agents.
+/// Sends a single user prompt and returns the response, or `None` on error.
+pub async fn ask_agent_llm(
+    llm: &dyn lab_core::llm::LLMClient,
+    model: &str,
+    prompt: String,
+    temperature: f64,
+    max_tokens: u32,
+) -> Option<String> {
+    match llm
+        .chat(
+            vec![lab_core::llm::ChatMessage::user(prompt)],
+            model,
+            temperature,
+            max_tokens,
+        )
+        .await
+    {
+        Ok(resp) => Some(resp.content),
+        Err(e) => {
+            tracing::warn!("LLM call failed: {}", e);
+            None
+        }
+    }
+}

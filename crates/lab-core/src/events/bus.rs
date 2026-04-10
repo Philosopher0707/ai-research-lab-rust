@@ -91,7 +91,7 @@ type EventHandler = Arc<dyn Fn(LabEvent) + Send + Sync>;
 struct Subscriber {
     handler: EventHandler,
     match_once: bool,
-    priority: i32,
+    _priority: i32,
 }
 
 // ─── EventBus ──────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ impl EventBus {
         self.subscribers.entry(pat).or_default().push(Subscriber {
             handler: Arc::new(handler),
             match_once: false,
-            priority,
+            _priority: priority,
         });
     }
 
@@ -150,7 +150,7 @@ impl EventBus {
         self.subscribers.entry(pat).or_default().push(Subscriber {
             handler: Arc::new(handler),
             match_once: true,
-            priority: 0,
+            _priority: 0,
         });
     }
 
@@ -162,7 +162,7 @@ impl EventBus {
             .push(Subscriber {
                 handler: Arc::new(handler),
                 match_once: false,
-                priority: 0,
+                _priority: 0,
             });
     }
 
@@ -212,7 +212,10 @@ impl EventBus {
 
         if pat_parts.len() != evt_parts.len() {
             // Allow trailing wildcard: "agent.*" matches "agent.started"
-            if pat_parts.len() == 2 && pat_parts[1] == "*" && pat_parts[0] == evt_parts.get(0).copied().unwrap_or("") {
+            if pat_parts.len() == 2
+                && pat_parts[1] == "*"
+                && pat_parts[0] == evt_parts.get(0).copied().unwrap_or("")
+            {
                 return true;
             }
             if pat_parts.len() == 1 && pat_parts[0] == "*" {
@@ -246,7 +249,8 @@ impl EventBus {
 
     /// Get history as JSON values.
     pub fn get_history_json(&self, filter: Option<&str>, limit: usize) -> serde_json::Value {
-        let events: Vec<_> = self.get_history(filter, limit)
+        let events: Vec<_> = self
+            .get_history(filter, limit)
             .into_iter()
             .map(|e| e.to_dict())
             .collect();

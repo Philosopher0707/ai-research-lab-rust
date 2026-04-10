@@ -80,7 +80,11 @@ pub trait Agent: Send + Sync {
     fn session_id(&self) -> &str;
     fn profile(&self) -> &AgentProfile;
     async fn start(&mut self) -> Result<AgentResult>;
-    async fn run_task(&mut self, task: &str, kwargs: HashMap<String, serde_json::Value>) -> Result<AgentResult>;
+    async fn run_task(
+        &mut self,
+        task: &str,
+        kwargs: HashMap<String, serde_json::Value>,
+    ) -> Result<AgentResult>;
     async fn cleanup(&mut self);
     fn state(&self) -> AgentState;
 }

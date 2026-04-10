@@ -7,7 +7,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
-use tracing::warn;
 
 // ─── Tool Result ───────────────────────────────────────────────
 
@@ -21,10 +20,20 @@ pub struct ToolResult {
 
 impl ToolResult {
     pub fn ok(data: serde_json::Value, start: Instant) -> Self {
-        Self { success: true, data: Some(data), error: None, duration_ms: start.elapsed().as_secs_f64() * 1000.0 }
+        Self {
+            success: true,
+            data: Some(data),
+            error: None,
+            duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+        }
     }
     pub fn err(message: impl Into<String>, start: Instant) -> Self {
-        Self { success: false, data: None, error: Some(message.into()), duration_ms: start.elapsed().as_secs_f64() * 1000.0 }
+        Self {
+            success: false,
+            data: None,
+            error: Some(message.into()),
+            duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+        }
     }
 }
 
@@ -40,17 +49,27 @@ pub trait Tool: Send + Sync {
 
 // ─── Read Tool ────────────────────────────────────────────────
 
-pub struct ReadTool { workspace: PathBuf }
+pub struct ReadTool {
+    workspace: PathBuf,
+}
 
 impl ReadTool {
-    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+    pub fn new(workspace: PathBuf) -> Self {
+        Self { workspace }
+    }
 }
 
 #[async_trait]
 impl Tool for ReadTool {
-    fn name(&self) -> &str { "read_file" }
-    fn description(&self) -> &str { "Read the contents of a file" }
-    fn category(&self) -> &str { "filesystem" }
+    fn name(&self) -> &str {
+        "read_file"
+    }
+    fn description(&self) -> &str {
+        "Read the contents of a file"
+    }
+    fn category(&self) -> &str {
+        "filesystem"
+    }
 
     async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult {
         let start = Instant::now();
@@ -62,7 +81,10 @@ impl Tool for ReadTool {
             return ToolResult::err("Path traversal not allowed", start);
         }
         let file_path = self.workspace.join(path);
-        let workspace_root = self.workspace.canonicalize().unwrap_or_else(|_| self.workspace.clone());
+        let workspace_root = self
+            .workspace
+            .canonicalize()
+            .unwrap_or_else(|_| self.workspace.clone());
         let Ok(resolved) = file_path.canonicalize() else {
             return ToolResult::err(format!("File not found: {path}"), start);
         };
@@ -73,14 +95,33 @@ impl Tool for ReadTool {
             Ok(content) => {
                 let all_lines: Vec<&str> = content.lines().collect();
                 let total_lines = all_lines.len();
-                let limit = params.get("limit").and_then(|v| v.as_u64()).map(|l| l as usize);
-                let offset = params.get("offset").and_then(|v| v.as_u64()).map(|o| o as usize).unwrap_or(0);
+                let limit = params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|l| l as usize);
+                let offset = params
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .map(|o| o as usize)
+                    .unwrap_or(0);
                 let lines: Vec<String> = if let Some(lim) = limit {
-                    all_lines.iter().skip(offset).take(lim).map(|s| s.to_string()).collect()
+                    all_lines
+                        .iter()
+                        .skip(offset)
+                        .take(lim)
+                        .map(|s| s.to_string())
+                        .collect()
                 } else {
-                    all_lines.iter().skip(offset).map(|s| s.to_string()).collect()
+                    all_lines
+                        .iter()
+                        .skip(offset)
+                        .map(|s| s.to_string())
+                        .collect()
                 };
-                ToolResult::ok(serde_json::json!({"content": lines.join("\n"), "total_lines": total_lines}), start)
+                ToolResult::ok(
+                    serde_json::json!({"content": lines.join("\n"), "total_lines": total_lines}),
+                    start,
+                )
             }
             Err(e) => ToolResult::err(e.to_string(), start),
         }
@@ -89,17 +130,27 @@ impl Tool for ReadTool {
 
 // ─── Write Tool ───────────────────────────────────────────────
 
-pub struct WriteTool { workspace: PathBuf }
+pub struct WriteTool {
+    workspace: PathBuf,
+}
 
 impl WriteTool {
-    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+    pub fn new(workspace: PathBuf) -> Self {
+        Self { workspace }
+    }
 }
 
 #[async_trait]
 impl Tool for WriteTool {
-    fn name(&self) -> &str { "write_file" }
-    fn description(&self) -> &str { "Write content to a file" }
-    fn category(&self) -> &str { "filesystem" }
+    fn name(&self) -> &str {
+        "write_file"
+    }
+    fn description(&self) -> &str {
+        "Write content to a file"
+    }
+    fn category(&self) -> &str {
+        "filesystem"
+    }
 
     async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult {
         let start = Instant::now();
@@ -123,7 +174,9 @@ impl Tool for WriteTool {
         }
         match tokio::fs::write(&file_path, content).await {
             Ok(()) => ToolResult::ok(
-                serde_json::json!({"path": path, "bytes_written": content.len()}), start),
+                serde_json::json!({"path": path, "bytes_written": content.len()}),
+                start,
+            ),
             Err(e) => ToolResult::err(e.to_string(), start),
         }
     }
@@ -131,17 +184,27 @@ impl Tool for WriteTool {
 
 // ─── Bash Tool ────────────────────────────────────────────────
 
-pub struct BashTool { workspace: PathBuf }
+pub struct BashTool {
+    workspace: PathBuf,
+}
 
 impl BashTool {
-    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+    pub fn new(workspace: PathBuf) -> Self {
+        Self { workspace }
+    }
 }
 
 #[async_trait]
 impl Tool for BashTool {
-    fn name(&self) -> &str { "bash" }
-    fn description(&self) -> &str { "Execute a shell command" }
-    fn category(&self) -> &str { "system" }
+    fn name(&self) -> &str {
+        "bash"
+    }
+    fn description(&self) -> &str {
+        "Execute a shell command"
+    }
+    fn category(&self) -> &str {
+        "system"
+    }
 
     async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult {
         let start = Instant::now();
@@ -157,12 +220,17 @@ impl Tool for BashTool {
                 .arg(command)
                 .current_dir(&self.workspace)
                 .output(),
-        ).await {
-            Ok(Ok(output)) => ToolResult::ok(serde_json::json!({
-                "stdout": String::from_utf8_lossy(&output.stdout),
-                "stderr": String::from_utf8_lossy(&output.stderr),
-                "returncode": output.status.code().unwrap_or(-1),
-            }), start),
+        )
+        .await
+        {
+            Ok(Ok(output)) => ToolResult::ok(
+                serde_json::json!({
+                    "stdout": String::from_utf8_lossy(&output.stdout),
+                    "stderr": String::from_utf8_lossy(&output.stderr),
+                    "returncode": output.status.code().unwrap_or(-1),
+                }),
+                start,
+            ),
             Ok(Err(e)) => ToolResult::err(e.to_string(), start),
             Err(_) => ToolResult::err(format!("Command timed out after {timeout_secs}s"), start),
         }
@@ -171,17 +239,27 @@ impl Tool for BashTool {
 
 // ─── Glob Tool ───────────────────────────────────────────────
 
-pub struct GlobTool { workspace: PathBuf }
+pub struct GlobTool {
+    workspace: PathBuf,
+}
 
 impl GlobTool {
-    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+    pub fn new(workspace: PathBuf) -> Self {
+        Self { workspace }
+    }
 }
 
 #[async_trait]
 impl Tool for GlobTool {
-    fn name(&self) -> &str { "glob_search" }
-    fn description(&self) -> &str { "Find files matching a glob pattern" }
-    fn category(&self) -> &str { "filesystem" }
+    fn name(&self) -> &str {
+        "glob_search"
+    }
+    fn description(&self) -> &str {
+        "Find files matching a glob pattern"
+    }
+    fn category(&self) -> &str {
+        "filesystem"
+    }
 
     async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult {
         let start = Instant::now();
@@ -214,7 +292,17 @@ impl Tool for GlobTool {
                 }
                 // Skip common noise directories
                 if let Some(name) = entry.file_name().to_str() {
-                    if matches!(name, ".git" | ".hg" | ".svn" | "node_modules" | ".cargo" | ".rustup" | "__pycache__" | ".nvm") {
+                    if matches!(
+                        name,
+                        ".git"
+                            | ".hg"
+                            | ".svn"
+                            | "node_modules"
+                            | ".cargo"
+                            | ".rustup"
+                            | "__pycache__"
+                            | ".nvm"
+                    ) {
                         continue;
                     }
                     if name.starts_with('.') && entry.file_type().is_dir() {
@@ -245,17 +333,27 @@ impl Tool for GlobTool {
 
 // ─── Grep Tool ───────────────────────────────────────────────
 
-pub struct GrepTool { workspace: PathBuf }
+pub struct GrepTool {
+    workspace: PathBuf,
+}
 
 impl GrepTool {
-    pub fn new(workspace: PathBuf) -> Self { Self { workspace } }
+    pub fn new(workspace: PathBuf) -> Self {
+        Self { workspace }
+    }
 }
 
 #[async_trait]
 impl Tool for GrepTool {
-    fn name(&self) -> &str { "grep_search" }
-    fn description(&self) -> &str { "Search file contents with regex" }
-    fn category(&self) -> &str { "filesystem" }
+    fn name(&self) -> &str {
+        "grep_search"
+    }
+    fn description(&self) -> &str {
+        "Search file contents with regex"
+    }
+    fn category(&self) -> &str {
+        "filesystem"
+    }
 
     async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult {
         let start = Instant::now();
@@ -267,14 +365,20 @@ impl Tool for GrepTool {
             Some(p) => PathBuf::from(p),
             None => self.workspace.clone(),
         };
-        let max_files = params.get("max_files").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+        let max_files = params
+            .get("max_files")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100) as usize;
         let Ok(re) = regex::Regex::new(pattern) else {
             return ToolResult::err(format!("Invalid regex pattern: {pattern}"), start);
         };
         let mut results = Vec::new();
         let mut files_searched = 0;
         if search_path.exists() && search_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&search_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(&search_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file() && files_searched < max_files {
                     files_searched += 1;
                     if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
@@ -291,9 +395,12 @@ impl Tool for GrepTool {
                 }
             }
         }
-        ToolResult::ok(serde_json::json!({
-            "matches": results, "count": results.len(), "files_searched": files_searched
-        }), start)
+        ToolResult::ok(
+            serde_json::json!({
+                "matches": results, "count": results.len(), "files_searched": files_searched
+            }),
+            start,
+        )
     }
 }
 
@@ -307,7 +414,11 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new(workspace: PathBuf) -> Self {
-        Self { tools: HashMap::new(), execution_log: Vec::new(), config_workspace: workspace.clone() }
+        Self {
+            tools: HashMap::new(),
+            execution_log: Vec::new(),
+            config_workspace: workspace.clone(),
+        }
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
@@ -334,7 +445,11 @@ impl ToolRegistry {
         }).collect()
     }
 
-    pub async fn execute(&mut self, name: &str, params: &HashMap<String, serde_json::Value>) -> serde_json::Value {
+    pub async fn execute(
+        &mut self,
+        name: &str,
+        params: &HashMap<String, serde_json::Value>,
+    ) -> serde_json::Value {
         let Some(tool) = self.tools.get(name) else {
             return serde_json::json!({"success": false, "error": format!("Tool '{name}' not found")});
         };

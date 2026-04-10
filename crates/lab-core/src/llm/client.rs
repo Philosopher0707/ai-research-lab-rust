@@ -19,7 +19,9 @@ pub struct ChatResponse {
     pub raw: Option<serde_json::Value>,
 }
 
-fn default_stop() -> String { "stop".into() }
+fn default_stop() -> String {
+    "stop".into()
+}
 
 // ─── LLMClient Trait ───────────────────────────────────────────────
 
@@ -44,13 +46,22 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".into(), content: content.into() }
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -100,18 +111,17 @@ impl LLMClient for OpenAICompatibleClient {
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().unwrap(),
         );
-        headers.insert(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", self.api_key).parse().unwrap(),
-        );
+        if !self.api_key.is_empty() {
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.api_key).parse().unwrap(),
+            );
+        }
         headers.insert(
             "HTTP-Referer",
             "https://github.com/ai-research-lab".parse().unwrap(),
         );
-        headers.insert(
-            "X-Title",
-            "AI Research Lab".parse().unwrap(),
-        );
+        headers.insert("X-Title", "AI Research Lab".parse().unwrap());
 
         let url = format!("{}/chat/completions", self.base_url);
 
@@ -120,7 +130,8 @@ impl LLMClient for OpenAICompatibleClient {
         let mut last_error = String::new();
 
         for attempt in 1..=max_retries {
-            let resp = self.client
+            let resp = self
+                .client
                 .post(&url)
                 .headers(headers.clone())
                 .json(&payload)
@@ -130,7 +141,9 @@ impl LLMClient for OpenAICompatibleClient {
             match resp {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
-                    let body: serde_json::Value = resp.json().await
+                    let body: serde_json::Value = resp
+                        .json()
+                        .await
                         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
                     if status < 400 {
@@ -154,7 +167,11 @@ impl LLMClient for OpenAICompatibleClient {
 
                             return Ok(ChatResponse {
                                 content,
-                                model: body.get("model").and_then(|m| m.as_str()).unwrap_or(model).to_string(),
+                                model: body
+                                    .get("model")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or(model)
+                                    .to_string(),
                                 finish_reason,
                                 usage,
                                 raw: Some(body),
@@ -165,12 +182,18 @@ impl LLMClient for OpenAICompatibleClient {
 
                     if status == 429 && attempt < max_retries {
                         let delay = 2f64.powi(attempt as i32 - 1);
-                        tracing::warn!("Rate limited (attempt {}/{}), retrying in {:.1}s", attempt, max_retries, delay);
+                        tracing::warn!(
+                            "Rate limited (attempt {}/{}), retrying in {:.1}s",
+                            attempt,
+                            max_retries,
+                            delay
+                        );
                         tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
                         continue;
                     }
 
-                    let err_msg = body.get("error")
+                    let err_msg = body
+                        .get("error")
                         .and_then(|e| e.get("message"))
                         .and_then(|m| m.as_str())
                         .unwrap_or("Unknown error");
@@ -180,15 +203,23 @@ impl LLMClient for OpenAICompatibleClient {
                     last_error = e.to_string();
                     if attempt < max_retries {
                         let delay = 2f64.powi(attempt as i32 - 1);
-                        tracing::warn!("Request failed (attempt {}/{}): {}. Retrying in {:.1}s",
-                                       attempt, max_retries, last_error, delay);
+                        tracing::warn!(
+                            "Request failed (attempt {}/{}): {}. Retrying in {:.1}s",
+                            attempt,
+                            max_retries,
+                            last_error,
+                            delay
+                        );
                         tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
                     }
                 }
             }
         }
 
-        Err(format!("LLM API request failed after {} attempts: {}", max_retries, last_error))
+        Err(format!(
+            "LLM API request failed after {} attempts: {}",
+            max_retries, last_error
+        ))
     }
 }
 
@@ -249,16 +280,11 @@ impl LLMClient for AnthropicClient {
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().unwrap(),
         );
-        headers.insert(
-            "x-api-key",
-            self.api_key.parse().unwrap(),
-        );
-        headers.insert(
-            "anthropic-version",
-            "2023-06-01".parse().unwrap(),
-        );
+        headers.insert("x-api-key", self.api_key.parse().unwrap());
+        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
 
-        let resp = self.client
+        let resp = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .headers(headers)
             .json(&payload)
@@ -267,11 +293,14 @@ impl LLMClient for AnthropicClient {
             .map_err(|e| format!("Anthropic API request failed: {}", e))?;
 
         let status = resp.status().as_u16();
-        let body: serde_json::Value = resp.json().await
+        let body: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if status >= 400 {
-            let err_msg = body.get("error")
+            let err_msg = body
+                .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
@@ -306,8 +335,16 @@ impl LLMClient for AnthropicClient {
 
         Ok(ChatResponse {
             content,
-            model: body.get("model").and_then(|m| m.as_str()).unwrap_or(model).to_string(),
-            finish_reason: body.get("stop_reason").and_then(|r| r.as_str()).unwrap_or("end_turn").to_string(),
+            model: body
+                .get("model")
+                .and_then(|m| m.as_str())
+                .unwrap_or(model)
+                .to_string(),
+            finish_reason: body
+                .get("stop_reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("end_turn")
+                .to_string(),
             usage,
             raw: Some(body),
         })
@@ -316,45 +353,87 @@ impl LLMClient for AnthropicClient {
 
 // ─── Factory ───────────────────────────────────────────────────────
 
+/// Provider default base URLs (used when base_url is empty).
+fn provider_base_url(provider: &str) -> &'static str {
+    match provider {
+        "openai" => "https://api.openai.com/v1",
+        "openrouter" => "https://openrouter.ai/api/v1",
+        "deepseek" => "https://api.deepseek.com/v1",
+        "zhipu" => "https://open.bigmodel.cn/api/paas/v4",
+        "minimax" => "https://api.minimax.chat/v1",
+        "xai" => "https://api.x.ai/v1",
+        "local" => "http://localhost:11434/v1",
+        _ => "https://api.openai.com/v1",
+    }
+}
+
+/// Provider default models (used when model is empty).
+fn provider_default_model(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "claude-sonnet-4-6",
+        "openai" => "gpt-4o",
+        "openrouter" => "anthropic/claude-sonnet-4-5",
+        "deepseek" => "deepseek-chat",
+        "zhipu" => "glm-4-flash",
+        "minimax" => "MiniMax-Text-01",
+        "xai" => "grok-2",
+        _ => "gpt-4o",
+    }
+}
+
+/// Resolve the best api_key for the given provider.
+/// Tries provider-specific env vars first, then generic LAB_API_KEY.
+fn resolve_api_key(provider: &str, explicit_key: &str) -> String {
+    if !explicit_key.is_empty() {
+        return explicit_key.to_string();
+    }
+    let from_env = match provider {
+        "anthropic" => std::env::var("ANTHROPIC_API_KEY").ok(),
+        "openai" => std::env::var("OPENAI_API_KEY").ok(),
+        "openrouter" => std::env::var("OPENROUTER_API_KEY").ok(),
+        "deepseek" => std::env::var("DEEPSEEK_API_KEY").ok(),
+        "zhipu" => std::env::var("ZHIPU_API_KEY").ok(),
+        "minimax" => std::env::var("MINIMAX_API_KEY").ok(),
+        "xai" => std::env::var("XAI_API_KEY").ok(),
+        _ => None,
+    };
+    from_env
+        .or_else(|| std::env::var("LAB_API_KEY").ok())
+        .unwrap_or_default()
+}
+
+/// Build an LLM client for the given provider.
+///
+/// Supported providers:
+///   anthropic | openai | openrouter | deepseek | zhipu | minimax | xai | local
+///
+/// All non-Anthropic providers use the OpenAI-compatible chat completions format.
 pub fn create_client(
     provider: &str,
     api_key: &str,
     model: &str,
     base_url: &str,
 ) -> Box<dyn LLMClient> {
-    let api_key = if api_key.is_empty() {
-        std::env::var("ANTHROPIC_API_KEY")
-            .or_else(|_| std::env::var("OPENAI_API_KEY"))
-            .unwrap_or_default()
+    let api_key = resolve_api_key(provider, api_key);
+    let model = if model.is_empty() {
+        provider_default_model(provider)
     } else {
-        api_key.to_string()
+        model
     };
 
     match provider {
         "anthropic" => Box::new(AnthropicClient::new(api_key)),
-        "openrouter" => {
-            let url = if base_url.is_empty() {
-                "https://openrouter.ai/api/v1"
-            } else {
-                base_url
-            };
-            Box::new(OpenAICompatibleClient::new(api_key, url.to_string(), model.to_string()))
-        }
-        "local" => {
-            let url = if base_url.is_empty() {
-                "http://localhost:11434/v1"
-            } else {
-                base_url
-            };
-            Box::new(OpenAICompatibleClient::new(api_key, url.to_string(), model.to_string()))
-        }
         _ => {
             let url = if base_url.is_empty() {
-                "https://api.openai.com/v1"
+                provider_base_url(provider)
             } else {
                 base_url
             };
-            Box::new(OpenAICompatibleClient::new(api_key, url.to_string(), model.to_string()))
+            Box::new(OpenAICompatibleClient::new(
+                api_key,
+                url.to_string(),
+                model.to_string(),
+            ))
         }
     }
 }

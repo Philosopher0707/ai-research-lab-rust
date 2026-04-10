@@ -2,20 +2,18 @@
 //! concurrent workers, retry with exponential backoff, and recurring tasks.
 //! Mirrors core/scheduler/queue.py (480 lines)
 
-use crate::errors::{LabError, Result};
+use crate::errors::Result;
 use crate::scheduler::models::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Semaphore;
-use tokio::sync::{Mutex as TokioMutex, Notify};
+use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
 /// Callback type for task execution.
 /// Returns the task result as a JSON value.
-pub type TaskExecutor = dyn Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>>
-    + Send
-    + Sync;
+pub type TaskExecutor =
+    dyn Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>> + Send + Sync;
 
 /// Priority heap — sorted insertion for priority ordering.
 struct PriorityHeap {
@@ -30,8 +28,7 @@ impl PriorityHeap {
     fn push(&mut self, task: TaskSpec) {
         let pos = self.items.iter().position(|existing| {
             task.priority > existing.priority
-                || (task.priority == existing.priority
-                    && task.created_at < existing.created_at)
+                || (task.priority == existing.priority && task.created_at < existing.created_at)
         });
         match pos {
             Some(i) => self.items.insert(i, task),
@@ -62,14 +59,6 @@ impl PriorityHeap {
     fn len(&self) -> usize {
         self.items.len()
     }
-
-    fn contains(&self, task_id: &str) -> bool {
-        self.items.iter().any(|t| t.id == task_id)
-    }
-
-    fn drain(&mut self) -> Vec<TaskSpec> {
-        std::mem::take(&mut self.items)
-    }
 }
 
 /// Priority-based async task queue.
@@ -81,10 +70,14 @@ pub struct TaskQueue {
     max_workers: usize,
     running_flag: bool,
     new_task_notify: Arc<Notify>,
-    // Channel for sending tasks to workers
-    task_tx: Option<tokio::sync::mpsc::Sender<String>>,
     // Executor closure to actually run a task
-    executor: Option<Arc<dyn Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>> + Send + Sync>>,
+    executor: Option<
+        Arc<
+            dyn Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 impl TaskQueue {
@@ -97,7 +90,6 @@ impl TaskQueue {
             max_workers,
             running_flag: false,
             new_task_notify: Arc::new(Notify::new()),
-            task_tx: None,
             executor: None,
         }
     }
@@ -105,7 +97,10 @@ impl TaskQueue {
     /// Set the executor function for running tasks.
     pub fn set_executor(
         &mut self,
-        executor: impl Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>> + Send + Sync + 'static,
+        executor: impl Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>>
+            + Send
+            + Sync
+            + 'static,
     ) {
         self.executor = Some(Arc::new(executor));
     }
@@ -137,8 +132,10 @@ impl TaskQueue {
         self.new_task_notify.notify_one();
 
         // If recurring, we handle it at the executor level
-        info!("Task submitted: {} ({:?}, {:?})",
-              id, task_type, task_priority);
+        info!(
+            "Task submitted: {} ({:?}, {:?})",
+            id, task_type, task_priority
+        );
         Ok(id)
     }
 
@@ -173,7 +170,7 @@ impl TaskQueue {
         task_id: &str,
         timeout: Option<std::time::Duration>,
     ) -> Option<serde_json::Value> {
-        let task = self.tasks.get(task_id)?;
+        self.tasks.get(task_id)?;
 
         let deadline = timeout.map(|d| std::time::Instant::now() + d);
 
@@ -258,7 +255,6 @@ impl TaskQueue {
 
         // Check schedule time
         if let Some(schedule_at) = task.schedule_at {
-            let now_f = task.created_at.elapsed().as_secs_f64();
             // schedule_at is absolute epoch — compare with current time
             let now_epoch = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -319,14 +315,19 @@ impl TaskQueue {
                 task.status = TaskStatus::Completed;
                 task.completed_at = Some(Instant::now());
                 task.result = Some(result);
-                let duration = task.completed_at.unwrap().duration_since(task.started_at.unwrap()).as_secs_f64();
+                let duration = task
+                    .completed_at
+                    .unwrap()
+                    .duration_since(task.started_at.unwrap())
+                    .as_secs_f64();
                 info!("Task {} completed in {:.1}s", task_id, duration);
             }
             Ok(Err(e)) => {
                 self.handle_failure(&mut task, &e).await;
             }
             Err(_) => {
-                self.handle_failure(&mut task, &format!("Timed out after {}s", timeout_secs)).await;
+                self.handle_failure(&mut task, &format!("Timed out after {}s", timeout_secs))
+                    .await;
             }
         }
 
@@ -353,22 +354,6 @@ impl TaskQueue {
             task.status = TaskStatus::Failed;
             task.completed_at = Some(Instant::now());
             error!("Task {} permanently failed: {}", task.id, error_msg);
-        }
-    }
-
-    /// Parse a recurring interval spec like "5m", "1h", "30s" into seconds.
-    fn parse_interval(spec: &str) -> f64 {
-        let spec = spec.trim();
-        if spec.ends_with('s') {
-            spec[..spec.len() - 1].parse::<f64>().unwrap_or(0.0)
-        } else if spec.ends_with('m') {
-            spec[..spec.len() - 1].parse::<f64>().unwrap_or(0.0) * 60.0
-        } else if spec.ends_with('h') {
-            spec[..spec.len() - 1].parse::<f64>().unwrap_or(0.0) * 3600.0
-        } else if spec.ends_with('d') {
-            spec[..spec.len() - 1].parse::<f64>().unwrap_or(0.0) * 86_400.0
-        } else {
-            spec.parse::<f64>().unwrap_or(0.0)
         }
     }
 }

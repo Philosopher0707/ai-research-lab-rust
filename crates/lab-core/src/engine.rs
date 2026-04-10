@@ -15,10 +15,7 @@ use lab_memory::MemoryWorkspace;
 use lab_permissions::{PermissionEngine, PermissionPolicy};
 use lab_tools::ToolRegistry;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 /// Master orchestrator for the AI Research Lab.
@@ -65,10 +62,10 @@ impl ResearchLab {
         let sessions_dir = config.full_path(&config.sessions_dir);
         let session_store = SessionStore::new(sessions_dir);
 
-        let mut event_bus = EventBus::new(1000);
+        let event_bus = EventBus::new(1000);
 
         // Create LLM client if configured
-        let llm_client = if !config.api_key.is_empty() && !config.provider.is_empty() {
+        let llm_client = if config.llm_configured() && !config.provider.is_empty() {
             Some(crate::llm::create_client(
                 &config.provider,
                 &config.api_key,
@@ -99,7 +96,11 @@ impl ResearchLab {
         let verbose = lab.config.verbose_logging;
         lab.event_bus.subscribe_all(move |event| {
             if verbose {
-                debug!("[EVENT] {}: {}", event.event_type, serde_json::to_string(&event.data).unwrap_or_default());
+                debug!(
+                    "[EVENT] {}: {}",
+                    event.event_type,
+                    serde_json::to_string(&event.data).unwrap_or_default()
+                );
             }
         });
 
@@ -127,11 +128,12 @@ impl ResearchLab {
 
     /// Close a session and persist its artifacts.
     pub async fn close_session(&mut self, session_id: &str) -> Result<()> {
-        let session = self.sessions.get_mut(session_id).ok_or_else(|| {
-            LabError::SessionNotFound(session_id.to_string())
-        })?;
+        let session = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LabError::SessionNotFound(session_id.to_string()))?;
         session.status = SessionStatus::Completed;
-        let record = self.session_store.save(session, None, None)?;
+        let _record = self.session_store.save(session, None, None)?;
 
         self.event_bus.emit(LabEvent::new(
             "session.closed",
@@ -198,7 +200,6 @@ impl ResearchLab {
 
     // ─── Pipeline Management ───────────────────────────────────
 
-
     /// Access the tool registry.
     pub fn tools(&self) -> &ToolRegistry {
         &self.tool_registry
@@ -218,8 +219,15 @@ impl ResearchLab {
     ) -> serde_json::Value {
         self.operation_counts.permission_checks += 1;
 
-        let result = self.permission_engine.check(agent_id, tool_name, params).await;
-        if result.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let result = self
+            .permission_engine
+            .check(agent_id, tool_name, params)
+            .await;
+        if result
+            .get("allowed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             self.operation_counts.permission_approved += 1;
         } else {
             self.operation_counts.permission_denied += 1;
@@ -236,7 +244,11 @@ impl ResearchLab {
     ) -> serde_json::Value {
         if let Some(aid) = agent_id {
             let perm = self.check_permission(aid, tool_name, &params).await;
-            if !perm.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !perm
+                .get("allowed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 return serde_json::json!({
                     "success": false,
                     "error": "permission_denied",
@@ -246,7 +258,6 @@ impl ResearchLab {
         }
 
         self.operation_counts.tool_calls += 1;
-        let tool_name_str = tool_name.to_string();
         self.tool_registry.execute(tool_name, &params).await
     }
 
@@ -257,7 +268,77 @@ impl ResearchLab {
         self.pipeline_configs.insert(name.to_string(), config);
     }
 
-    /// Run a registered pipeline (delegates to external pipeline engine).
+    pub async fn begin_pipeline_run(&mut self, pipeline_name: &str) -> Result<String> {
+        self.operation_counts.pipeline_runs += 1;
+        let session = self
+            .create_session(&format!("pipeline-{}", pipeline_name))
+            .await?;
+        let session_id = session.id.clone();
+
+        self.event_bus.emit(LabEvent::new(
+            "pipeline.started",
+            serde_json::json!({"pipeline": pipeline_name, "session_id": session_id}),
+        ));
+
+        Ok(session_id)
+    }
+
+    fn completed_pipeline_steps(result: &serde_json::Value) -> usize {
+        result
+            .get("stage_results")
+            .and_then(|value| value.as_array())
+            .map(|stages| {
+                stages
+                    .iter()
+                    .filter(|stage| {
+                        stage.get("status").and_then(|value| value.as_str()) == Some("completed")
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    fn pipeline_result_field(result: &serde_json::Value, field: &str) -> serde_json::Value {
+        result
+            .get(field)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    }
+
+    pub async fn finish_pipeline_run(
+        &mut self,
+        session_id: &str,
+        pipeline_name: &str,
+        result: &serde_json::Value,
+    ) -> Result<()> {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.tasks_completed = Self::completed_pipeline_steps(result);
+        }
+
+        let _ = self.memory.store(
+            session_id,
+            "pipeline_result",
+            result,
+            Some(vec!["pipeline".into(), pipeline_name.to_string()]),
+        );
+
+        self.event_bus.emit(LabEvent::new(
+            "pipeline.completed",
+            serde_json::json!({
+                "pipeline": pipeline_name,
+                "session_id": session_id,
+                "status": Self::pipeline_result_field(result, "status"),
+                "output_path": Self::pipeline_result_field(result, "output_path"),
+            }),
+        ));
+
+        self.close_session(session_id).await
+    }
+
+    /// Legacy lightweight pipeline path.
+    ///
+    /// The CLI and API now run real staged pipelines through `lab-pipelines`.
+    /// This method remains for simple registered-pipeline bookkeeping.
     pub async fn run_pipeline(
         &mut self,
         pipeline_name: &str,
@@ -270,9 +351,7 @@ impl ResearchLab {
             });
         }
 
-        self.operation_counts.pipeline_runs += 1;
-        let session = self.create_session(&format!("pipeline-{}", pipeline_name)).await?;
-        let session_id = session.id.clone();
+        let session_id = self.begin_pipeline_run(pipeline_name).await?;
 
         let result = serde_json::json!({
             "pipeline": pipeline_name,
@@ -280,12 +359,8 @@ impl ResearchLab {
             "status": "completed",
         });
 
-        self.event_bus.emit(LabEvent::new(
-            "pipeline.completed",
-            serde_json::json!({"pipeline": pipeline_name, "session_id": session_id}),
-        ));
-
-        self.close_session(&session_id).await?;
+        self.finish_pipeline_run(&session_id, pipeline_name, &result)
+            .await?;
         Ok(result)
     }
 
@@ -317,7 +392,7 @@ impl ResearchLab {
 
     /// Check if LLM is configured.
     pub fn has_llm(&self) -> bool {
-        self.llm_client.is_some() && !self.config.api_key.is_empty()
+        self.llm_client.is_some() && self.config.llm_configured()
     }
 
     /// Get a reference to the LLM client (borrowed).
@@ -332,7 +407,7 @@ impl ResearchLab {
 
     /// Get the LLM error from the last operation (for debugging).
     pub fn llm_error(&self) -> Option<&str> {
-        None  // Placeholder for future error tracking
+        None // Placeholder for future error tracking
     }
 
     /// Send a prompt to the configured LLM.
@@ -376,13 +451,14 @@ impl ResearchLab {
         params: HashMap<String, serde_json::Value>,
         executor_fn: impl Fn(
                 &crate::workflows::WorkflowStep,
-                &HashMap<String, serde_json::Value>
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>>
-            + Send
+                &HashMap<String, serde_json::Value>,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>,
+            > + Send
             + Sync,
     ) -> Result<WorkflowExecution> {
         let engine = WorkflowEngine::new();
-        let mut wf = workflow.clone();
+        let wf = workflow.clone();
         wf.validate()?;
 
         let result = engine.execute(wf, executor_fn, session_id, params).await?;
@@ -412,16 +488,21 @@ impl ResearchLab {
         params: HashMap<String, serde_json::Value>,
         executor_fn: impl Fn(
                 &crate::workflows::WorkflowStep,
-                &HashMap<String, serde_json::Value>
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>>
-            + Send
+                &HashMap<String, serde_json::Value>,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>,
+            > + Send
             + Sync,
     ) -> Result<WorkflowExecution> {
         let mut registry = TemplateRegistry::new();
         register_builtin_templates(&mut registry);
 
         let template = registry.get(template_name).ok_or_else(|| {
-            let available: Vec<&str> = registry.list_templates().iter().map(|t| t.name.as_str()).collect();
+            let available: Vec<&str> = registry
+                .list_templates()
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
             LabError::WorkflowError(format!(
                 "Template '{}' not found. Available: {:?}",
                 template_name, available
@@ -429,7 +510,59 @@ impl ResearchLab {
         })?;
 
         let workflow = template.instantiate(workflow_name, Some(&params));
-        self.run_workflow(workflow, session_id, params, executor_fn).await
+        self.run_workflow(workflow, session_id, params, executor_fn)
+            .await
+    }
+
+    /// Restore active sessions saved to disk on a previous run.
+    /// Call this after `start()` to resume previous work.
+    pub fn restore_sessions(&mut self) -> usize {
+        match self.session_store.query(Some("active"), None, None, 0, 0) {
+            Ok(records) => {
+                let count = records.len();
+                for record in records {
+                    match record.to_session() {
+                        Ok(session) if !self.sessions.contains_key(&session.id) => {
+                            info!("Restored session: {} ({})", session.id, session.name);
+                            self.sessions.insert(session.id.clone(), session);
+                        }
+                        _ => {}
+                    }
+                }
+                if count > 0 {
+                    info!("Restored {} active session(s) from disk", count);
+                }
+                count
+            }
+            Err(e) => {
+                warn!("Failed to restore sessions: {}", e);
+                0
+            }
+        }
+    }
+
+    /// Send a full message history to the configured LLM (for multi-turn chat).
+    pub async fn ask_llm_messages(
+        &self,
+        messages: Vec<crate::llm::ChatMessage>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Option<String> {
+        if !self.has_llm() {
+            warn!("LLM not configured — ask_llm_messages returning None");
+            return None;
+        }
+        let client = self.llm_client.as_ref()?;
+        match client
+            .chat(messages, &self.config.model, temperature, max_tokens)
+            .await
+        {
+            Ok(resp) => Some(resp.content),
+            Err(e) => {
+                warn!("LLM chat failed: {}", e);
+                None
+            }
+        }
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────
@@ -471,7 +604,10 @@ impl ResearchLab {
             }
         }
 
-        let uptime = self.start_time.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0);
+        let uptime = self
+            .start_time
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
         info!("Research Lab shutdown (uptime: {:.1}s)", uptime);
         Ok(())
     }
@@ -502,7 +638,11 @@ impl ResearchLab {
             operations: self.operation_counts.clone(),
             pipeline_configs: self.pipeline_configs.keys().cloned().collect(),
             memory_entries: self.memory.entry_count(),
-            permission_policy: self.config.permission_policy.default_restriction_level.clone(),
+            permission_policy: self
+                .config
+                .permission_policy
+                .default_restriction_level
+                .clone(),
         }
     }
 }
@@ -514,8 +654,8 @@ mod tests {
 
     #[tokio::test]
     async fn lab_creates_session() {
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let config = LabConfig::with_workspace(temp_dir);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = LabConfig::with_workspace(temp_dir.path().to_path_buf());
         let mut lab = ResearchLab::new(config);
         lab.start().await.unwrap();
 
@@ -528,13 +668,14 @@ mod tests {
 
     #[tokio::test]
     async fn lab_executes_tool() {
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let config = LabConfig::with_workspace(temp_dir.clone());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let workspace = temp_dir.path().to_path_buf();
+        let config = LabConfig::with_workspace(workspace.clone());
         let mut lab = ResearchLab::new(config);
         lab.start().await.unwrap();
 
         // Create a test file
-        let test_file = temp_dir.join("test.txt");
+        let test_file = workspace.join("test.txt");
         std::fs::write(&test_file, "hello world").unwrap();
 
         // Execute read_file tool
@@ -553,8 +694,8 @@ mod tests {
 
     #[tokio::test]
     async fn lab_close_session() {
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let config = LabConfig::with_workspace(temp_dir);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = LabConfig::with_workspace(temp_dir.path().to_path_buf());
         let mut lab = ResearchLab::new(config);
         lab.start().await.unwrap();
 
@@ -569,18 +710,17 @@ mod tests {
     }
 
     #[test]
-    fn lab_has_no_llm_by_default() {
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let config = LabConfig::with_workspace(temp_dir);
+    fn lab_llm_state_matches_config() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = LabConfig::with_workspace(temp_dir.path().to_path_buf());
         let lab = ResearchLab::new(config);
-        // Without API key, no LLM client
-        assert!(!lab.has_llm() || lab.config.api_key.is_empty());
+        assert_eq!(lab.has_llm(), lab.config.llm_configured());
     }
 
     #[tokio::test]
     async fn lab_stats() {
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let config = LabConfig::with_workspace(temp_dir);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = LabConfig::with_workspace(temp_dir.path().to_path_buf());
         let mut lab = ResearchLab::new(config);
         lab.start().await.unwrap();
 

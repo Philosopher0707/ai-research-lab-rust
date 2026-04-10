@@ -40,7 +40,9 @@ pub struct SessionRecord {
     pub pipeline_runs: Vec<String>,
 }
 
-fn default_active() -> String { "active".into() }
+fn default_active() -> String {
+    "active".into()
+}
 
 impl SessionRecord {
     pub fn from_session(session: &LabSession) -> Self {
@@ -149,14 +151,17 @@ impl SessionStore {
         }
 
         // Update index
-        self.index.insert(record.id.clone(), serde_json::json!({
-            "name": record.name,
-            "status": record.status,
-            "created_at": record.created_at,
-            "tags": record.tags,
-            "agents_count": record.agents_count,
-            "tasks_completed": record.tasks_completed,
-        }));
+        self.index.insert(
+            record.id.clone(),
+            serde_json::json!({
+                "name": record.name,
+                "status": record.status,
+                "created_at": record.created_at,
+                "tags": record.tags,
+                "agents_count": record.agents_count,
+                "tasks_completed": record.tasks_completed,
+            }),
+        );
         self.records.insert(record.id.clone(), record.clone());
         self.save_index()?;
 
@@ -176,8 +181,9 @@ impl SessionStore {
         }
 
         let content = std::fs::read_to_string(&session_file)?;
-        let record: SessionRecord = serde_json::from_str(&content)
-            .map_err(|e| LabError::ParseError(format!("Failed to load session {}: {}", session_id, e)))?;
+        let record: SessionRecord = serde_json::from_str(&content).map_err(|e| {
+            LabError::ParseError(format!("Failed to load session {}: {}", session_id, e))
+        })?;
         self.records.insert(session_id.to_string(), record.clone());
         Ok(Some(record))
     }
@@ -207,16 +213,26 @@ impl SessionStore {
         for sid in ids {
             if let Some(record) = self.load_record(&sid)? {
                 if let Some(s) = status {
-                    if record.status != s { continue; }
+                    if record.status != s {
+                        continue;
+                    }
                 }
                 if let Some(t) = tag {
-                    if !record.tags.contains(&t.to_string()) { continue; }
+                    if !record.tags.contains(&t.to_string()) {
+                        continue;
+                    }
                 }
                 if let Some(nq) = name_query {
-                    if !record.name.to_lowercase().contains(&nq.to_lowercase()) { continue; }
+                    if !record.name.to_lowercase().contains(&nq.to_lowercase()) {
+                        continue;
+                    }
                 }
-                if record.tasks_completed < min_tasks { continue; }
-                if record.agents_count < min_agents { continue; }
+                if record.tasks_completed < min_tasks {
+                    continue;
+                }
+                if record.agents_count < min_agents {
+                    continue;
+                }
                 results.push(record);
             }
         }
@@ -283,15 +299,13 @@ impl SessionStore {
     fn load_index(&mut self) {
         if self.index_path.exists() {
             match std::fs::read_to_string(&self.index_path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(index) => self.index = index,
-                        Err(e) => {
-                            warn!("Corrupt session index, starting fresh: {}", e);
-                            self.index = HashMap::new();
-                        }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(index) => self.index = index,
+                    Err(e) => {
+                        warn!("Corrupt session index, starting fresh: {}", e);
+                        self.index = HashMap::new();
                     }
-                }
+                },
                 Err(e) => warn!("Failed to read session index: {}", e),
             }
         }

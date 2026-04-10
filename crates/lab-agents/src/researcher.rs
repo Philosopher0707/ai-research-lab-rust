@@ -3,13 +3,13 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
-use lab_core::llm::{ChatMessage, LLMClient};
+use lab_core::llm::ChatMessage;
+use lab_core::llm::LLMClient;
 use lab_core::types::{AgentResult, AgentState};
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::Mutex;
 
 pub struct ResearcherAgent {
     impl_: AgentImpl,
@@ -30,12 +30,18 @@ impl ResearcherAgent {
         }
     }
 
-    pub fn id(&self) -> &str { self.impl_.id() }
-    pub fn session_id(&self) -> &str { self.impl_.session_id() }
-    pub fn state(&self) -> AgentState { self.impl_.state() }
+    pub fn id(&self) -> &str {
+        self.impl_.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.impl_.session_id()
+    }
+    pub fn state(&self) -> AgentState {
+        self.impl_.state()
+    }
 
     /// Execute the research task with optional LLM intelligence.
-    /// 
+    ///
     /// Without LLM: discovers files, counts classes/functions (heuristic)
     /// With LLM: additionally analyzes architecture, patterns, and dependencies
     pub async fn execute(
@@ -92,7 +98,6 @@ impl ResearcherAgent {
         // 2. Analyse files
         let limit = file_limit.unwrap_or(50).min(200);
         let mut file_details = Vec::new();
-
         for fp in file_list.iter().take(limit) {
             let content_result = registry
                 .execute(
@@ -112,11 +117,12 @@ impl ResearcherAgent {
                 continue;
             }
 
-            let content = content_result
+            let content: String = content_result
                 .get("data")
                 .and_then(|d| d.get("content"))
                 .and_then(|c| c.as_str())
-                .unwrap_or("");
+                .unwrap_or("")
+                .to_owned();
 
             let lines: Vec<&str> = content.lines().collect();
             let total_lines: usize = content_result
@@ -162,26 +168,28 @@ impl ResearcherAgent {
 
         let total_classes: usize = file_details
             .iter()
-            .map(|f| f.get("class_names").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0))
+            .map(|f| {
+                f.get("class_names")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0)
+            })
             .sum();
 
         let total_functions: usize = file_details
             .iter()
             .map(|f| {
-                let a = f.get("async_functions").and_then(|v| v.as_u64()).unwrap_or(0);
-                let s = f.get("sync_functions").and_then(|v| v.as_u64()).unwrap_or(0);
+                let a = f
+                    .get("async_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let s = f
+                    .get("sync_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 (a + s) as usize
             })
             .sum();
-
-        let results = serde_json::json!({
-            "task": task,
-            "total_files": total_files,
-            "files_analysed": file_details.len(),
-            "files": file_details,
-            "total_classes": total_classes,
-            "total_functions": total_functions,
-        });
 
         // ─── LLM Enhancement (if available) ──────────────
         let mut llm_analysis: Option<serde_json::Value> = None;
@@ -189,35 +197,51 @@ impl ResearcherAgent {
             // Pick top 2 files for LLM analysis (keep it under ~30s)
             let top_files: Vec<_> = file_details.iter().take(2).collect();
             let mut file_summaries = Vec::new();
-            
+
             for fdata in &top_files {
                 if let Some(fp) = fdata.get("path").and_then(|v| v.as_str()) {
                     // Read more content for LLM — limit to 1500 chars
-                    let content_result = registry.execute("read_file", &HashMap::from([
-                        ("path".into(), serde_json::json!(fp)),
-                        ("limit".into(), serde_json::json!(300)),
-                    ])).await;
-                    
-                    if content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        if let Some(content) = content_result.get("data").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                    let content_result = registry
+                        .execute(
+                            "read_file",
+                            &HashMap::from([
+                                ("path".into(), serde_json::json!(fp)),
+                                ("limit".into(), serde_json::json!(300)),
+                            ]),
+                        )
+                        .await;
+
+                    if content_result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        if let Some(content) = content_result
+                            .get("data")
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
                             let truncated = if content.len() > 1500 {
-                                let end = content.char_indices()
+                                let end = content
+                                    .char_indices()
                                     .take_while(|(idx, _)| *idx < 1500)
                                     .last()
                                     .map(|(idx, c)| idx + c.len_utf8())
                                     .unwrap_or(content.len());
                                 &content[..end]
-                            } else { content };
-                            
+                            } else {
+                                content
+                            };
+
                             let prompt = format!(
                                 "Briefly describe this file's purpose and key patterns (max 3 sentences).\n\
                                  File: {}\n\n{}", fp, truncated
                             );
-                            
-                            match llm.chat(
-                                vec![ChatMessage::user(prompt)],
-                                model, 0.1, 256
-                            ).await {
+
+                            match llm
+                                .chat(vec![ChatMessage::user(prompt)], model, 0.1, 256)
+                                .await
+                            {
                                 Ok(resp) => {
                                     file_summaries.push(serde_json::json!({
                                         "path": fp,
@@ -232,7 +256,7 @@ impl ResearcherAgent {
                     }
                 }
             }
-            
+
             if !file_summaries.is_empty() {
                 llm_analysis = Some(serde_json::json!({
                     "llm_file_analyses": file_summaries,

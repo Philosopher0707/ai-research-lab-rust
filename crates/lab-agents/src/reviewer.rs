@@ -2,7 +2,7 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
-use lab_core::llm::LLMClient;
+use lab_core::llm::ChatMessage;
 use lab_core::types::AgentResult;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -19,15 +19,25 @@ impl ReviewerAgent {
     pub fn new(id: String, session_id: String, profile: AgentProfile, workspace: PathBuf) -> Self {
         Self {
             impl_: AgentImpl::new(
-                id.clone(), "reviewer".into(), session_id, profile, workspace.clone(),
+                id.clone(),
+                "reviewer".into(),
+                session_id,
+                profile,
+                workspace.clone(),
             ),
             workspace,
         }
     }
 
-    pub fn id(&self) -> &str { self.impl_.id() }
-    pub fn session_id(&self) -> &str { self.impl_.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.impl_.state() }
+    pub fn id(&self) -> &str {
+        self.impl_.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.impl_.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.impl_.state()
+    }
 
     /// Execute: review files for code quality issues.
     pub async fn execute(
@@ -38,8 +48,8 @@ impl ReviewerAgent {
         pattern: Option<&str>,
         path: Option<&str>,
         file_limit: Option<usize>,
-        _llm: Option<&dyn lab_core::llm::LLMClient>,
-        _model: Option<&str>,
+        llm: Option<&dyn lab_core::llm::LLMClient>,
+        model: Option<&str>,
     ) -> AgentResult {
         if let Err(e) = self.impl_.start().await {
             return AgentResult::fail(e.to_string(), None);
@@ -48,11 +58,18 @@ impl ReviewerAgent {
         let pattern = pattern.unwrap_or("**/*.py");
 
         // 1. Discover files
-        let files_result = registry.execute("glob_search", &HashMap::from([
-            ("pattern".into(), serde_json::json!(pattern)),
-        ])).await;
+        let files_result = registry
+            .execute(
+                "glob_search",
+                &HashMap::from([("pattern".into(), serde_json::json!(pattern))]),
+            )
+            .await;
 
-        if !files_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if !files_result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             self.impl_.cleanup().await;
             return AgentResult::fail("File discovery failed", Some(files_result));
         }
@@ -61,7 +78,11 @@ impl ReviewerAgent {
             .get("data")
             .and_then(|d| d.get("matches"))
             .and_then(|m| m.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         if let Some(p) = path {
@@ -78,11 +99,18 @@ impl ReviewerAgent {
         let bare_catch_re = Regex::new(r"^\s*\.unwrap\(\)").ok();
 
         for fp in file_list.iter().take(limit) {
-            let content_result = registry.execute("read_file", &HashMap::from([
-                ("path".into(), serde_json::json!(fp)),
-            ])).await;
+            let content_result = registry
+                .execute(
+                    "read_file",
+                    &HashMap::from([("path".into(), serde_json::json!(fp))]),
+                )
+                .await;
 
-            if !content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !content_result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -96,7 +124,9 @@ impl ReviewerAgent {
             let mut issues = Vec::new();
 
             // Check docstrings (first 10 lines)
-            let has_docstring = lines.iter().take(10).any(|l| l.contains("\"\"\"") || l.contains("'''") || l.contains("//!") || l.contains("///"));
+            let has_docstring = lines.iter().take(10).any(|l| {
+                l.contains("\"\"\"") || l.contains("'''") || l.contains("//!") || l.contains("///")
+            });
             if !has_docstring {
                 issues.push(serde_json::json!({
                     "rule": "missing_docstring",
@@ -168,26 +198,95 @@ impl ReviewerAgent {
         let mut by_rule = HashMap::new();
         let mut total_issues = 0;
         for review in &reviews {
-            total_issues += review.get("issue_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            total_issues += review
+                .get("issue_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
             if let Some(issues) = review.get("issues").and_then(|v| v.as_array()) {
                 for issue in issues {
-                    let rule = issue.get("rule").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let rule = issue
+                        .get("rule")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
                     *by_rule.entry(rule).or_insert(0) += 1;
                 }
             }
         }
 
-        let data = serde_json::json!({
-            "task": task,
-            "reviews": reviews,
-            "summary": {
-                "files_reviewed": reviews.len(),
-                "total_issues": total_issues,
-                "by_rule": by_rule,
-            }
-        });
+        let files_reviewed = reviews.len();
 
-        self.impl_.write_memory(memory, "review_results", &data, None);
+        // LLM enhancement — add deep review insights for top files
+        let llm_insights: Vec<serde_json::Value> = if let (Some(llm), Some(model)) = (llm, model) {
+            let mut insights = Vec::new();
+            for review in reviews.iter().take(2) {
+                if let Some(fp) = review.get("path").and_then(|v| v.as_str()) {
+                    let cr = registry
+                        .execute(
+                            "read_file",
+                            &HashMap::from([
+                                ("path".into(), serde_json::json!(fp)),
+                                ("limit".into(), serde_json::json!(150)),
+                            ]),
+                        )
+                        .await;
+                    if let Some(content) = cr
+                        .get("data")
+                        .and_then(|d| d.get("content"))
+                        .and_then(|c| c.as_str())
+                    {
+                        let snippet = if content.len() > 2500 {
+                            &content[..2500]
+                        } else {
+                            content
+                        };
+                        let prompt = format!(
+                            "Code review for `{fp}`. List 3–5 concrete quality issues or improvements:\n\n{snippet}"
+                        );
+                        match llm
+                            .chat(vec![ChatMessage::user(prompt)], model, 0.1, 512)
+                            .await
+                        {
+                            Ok(resp) => insights.push(serde_json::json!({
+                                "path": fp,
+                                "review": resp.content,
+                            })),
+                            Err(e) => tracing::warn!("LLM review for {}: {}", fp, e),
+                        }
+                    }
+                }
+            }
+            insights
+        } else {
+            Vec::new()
+        };
+
+        let data = if llm_insights.is_empty() {
+            serde_json::json!({
+                "task": task,
+                "reviews": reviews,
+                "summary": {
+                    "files_reviewed": files_reviewed,
+                    "total_issues": total_issues,
+                    "by_rule": by_rule,
+                }
+            })
+        } else {
+            serde_json::json!({
+                "task": task,
+                "reviews": reviews,
+                "llm_insights": llm_insights,
+                "llm_enhanced": true,
+                "summary": {
+                    "files_reviewed": files_reviewed,
+                    "total_issues": total_issues,
+                    "by_rule": by_rule,
+                }
+            })
+        };
+
+        self.impl_
+            .write_memory(memory, "review_results", &data, None);
         self.impl_.cleanup().await;
         AgentResult::ok(data)
     }

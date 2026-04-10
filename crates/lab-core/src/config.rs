@@ -4,30 +4,145 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Once;
 
 // ─── Defaults ──────────────────────────────────────────────────────
 
 fn default_workspace() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
-fn def_sessions() -> PathBuf { PathBuf::from("lab-sessions") }
-fn def_memory() -> PathBuf { PathBuf::from("lab-memory") }
-fn def_outputs() -> PathBuf { PathBuf::from("lab-outputs") }
-fn def_skills() -> PathBuf { PathBuf::from("lab-skills") }
-fn def_audits() -> PathBuf { PathBuf::from("lab-audits") }
-fn def_cache() -> PathBuf { PathBuf::from("lab-cache") }
-fn def_max_agents() -> usize { 20 }
-fn def_max_tasks() -> usize { 10 }
-fn def_timeout() -> u64 { 300 }
-fn def_provider() -> String { "openrouter".into() }
-fn def_base_url() -> String { "https://openrouter.ai/api/v1".into() }
-fn def_model() -> String { "anthropic/claude-sonnet-4-20250514".into() }
-fn def_memory_backend() -> String { "filesystem".into() }
-fn def_memory_max() -> usize { 10000 }
-fn def_memory_ttl() -> u64 { 86400 * 7 }
-fn def_web_engine() -> String { "default".into() }
-fn def_web_rate() -> usize { 10 }
-fn def_web_timeout() -> u64 { 30 }
+fn def_sessions() -> PathBuf {
+    PathBuf::from("lab-sessions")
+}
+fn def_memory() -> PathBuf {
+    PathBuf::from("lab-memory")
+}
+fn def_outputs() -> PathBuf {
+    PathBuf::from("lab-outputs")
+}
+fn def_skills() -> PathBuf {
+    PathBuf::from("lab-skills")
+}
+fn def_audits() -> PathBuf {
+    PathBuf::from("lab-audits")
+}
+fn def_cache() -> PathBuf {
+    PathBuf::from("lab-cache")
+}
+fn def_max_agents() -> usize {
+    20
+}
+fn def_max_tasks() -> usize {
+    10
+}
+fn def_timeout() -> u64 {
+    300
+}
+fn def_provider() -> String {
+    "openrouter".into()
+}
+fn def_base_url() -> String {
+    "https://openrouter.ai/api/v1".into()
+}
+fn def_model() -> String {
+    "anthropic/claude-sonnet-4-20250514".into()
+}
+fn def_memory_backend() -> String {
+    "filesystem".into()
+}
+fn def_memory_max() -> usize {
+    10000
+}
+fn def_memory_ttl() -> u64 {
+    86400 * 7
+}
+fn def_web_engine() -> String {
+    "default".into()
+}
+fn def_web_rate() -> usize {
+    10
+}
+fn def_web_timeout() -> u64 {
+    30
+}
+
+static ENV_INIT: Once = Once::new();
+
+fn env_non_empty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn provider_api_env_key(provider: &str) -> Option<&'static str> {
+    match provider {
+        "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "openai" => Some("OPENAI_API_KEY"),
+        "openrouter" => Some("OPENROUTER_API_KEY"),
+        "deepseek" => Some("DEEPSEEK_API_KEY"),
+        "zhipu" => Some("ZHIPU_API_KEY"),
+        "minimax" => Some("MINIMAX_API_KEY"),
+        "xai" => Some("XAI_API_KEY"),
+        _ => None,
+    }
+}
+
+fn provider_default_base_url(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "https://api.anthropic.com",
+        "openai" => "https://api.openai.com/v1",
+        "openrouter" => "https://openrouter.ai/api/v1",
+        "deepseek" => "https://api.deepseek.com/v1",
+        "zhipu" => "https://open.bigmodel.cn/api/paas/v4",
+        "minimax" => "https://api.minimax.chat/v1",
+        "xai" => "https://api.x.ai/v1",
+        "local" => "http://localhost:11434/v1",
+        _ => "https://openrouter.ai/api/v1",
+    }
+}
+
+fn provider_default_model(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "claude-sonnet-4-6",
+        "openai" => "gpt-4o",
+        "openrouter" => "anthropic/claude-sonnet-4-5",
+        "deepseek" => "deepseek-chat",
+        "zhipu" => "glm-4-flash",
+        "minimax" => "MiniMax-Text-01",
+        "xai" => "grok-2",
+        "local" => "llama3.2",
+        _ => "anthropic/claude-sonnet-4-20250514",
+    }
+}
+
+fn provider_supports_keyless_access(provider: &str) -> bool {
+    provider == "local"
+}
+
+fn detect_provider_from_env() -> Option<&'static str> {
+    for provider in [
+        "anthropic",
+        "openai",
+        "openrouter",
+        "deepseek",
+        "zhipu",
+        "minimax",
+        "xai",
+    ] {
+        if let Some(env_key) = provider_api_env_key(provider) {
+            if env_non_empty(env_key).is_some() {
+                return Some(provider);
+            }
+        }
+    }
+
+    if env_non_empty("LAB_BASE_URL").is_some() {
+        return Some("local");
+    }
+
+    None
+}
 
 // ─── AgentProfile ──────────────────────────────────────────────────
 
@@ -67,17 +182,39 @@ pub struct AgentProfile {
     pub custom_instructions: String,
 }
 
-fn def_max_tokens() -> usize { 32000 }
-fn def_temperature() -> f64 { 0.3 }
-fn def_top_p() -> f64 { 0.9 }
-fn def_max_iter() -> usize { 50 }
-fn def_perm_level() -> String { "standard".into() }
-fn def_output_fmt() -> String { "markdown".into() }
-fn def_verbosity() -> String { "normal".into() }
-fn def_agent_timeout() -> u64 { 300 }
-fn def_concurrent() -> usize { 3 }
-fn def_retry() -> usize { 3 }
-fn def_mem_scope() -> String { "session".into() }
+fn def_max_tokens() -> usize {
+    32000
+}
+fn def_temperature() -> f64 {
+    0.3
+}
+fn def_top_p() -> f64 {
+    0.9
+}
+fn def_max_iter() -> usize {
+    50
+}
+fn def_perm_level() -> String {
+    "standard".into()
+}
+fn def_output_fmt() -> String {
+    "markdown".into()
+}
+fn def_verbosity() -> String {
+    "normal".into()
+}
+fn def_agent_timeout() -> u64 {
+    300
+}
+fn def_concurrent() -> usize {
+    3
+}
+fn def_retry() -> usize {
+    3
+}
+fn def_mem_scope() -> String {
+    "session".into()
+}
 
 impl Default for AgentProfile {
     fn default() -> Self {
@@ -128,9 +265,15 @@ pub struct PipelineConfig {
     pub custom_params: HashMap<String, serde_json::Value>,
 }
 
-fn def_max_concurrent_stages() -> usize { 5 }
-fn def_stage_timeout() -> u64 { 1800 }
-fn def_true() -> bool { true }
+fn def_max_concurrent_stages() -> usize {
+    5
+}
+fn def_stage_timeout() -> u64 {
+    1800
+}
+fn def_true() -> bool {
+    true
+}
 
 impl Default for PipelineConfig {
     fn default() -> Self {
@@ -186,20 +329,28 @@ pub struct PermissionPolicyConfig {
     pub emergency_stop_tools: Vec<String>,
 }
 
-fn def_restrict_level() -> String { "standard".into() }
-fn def_max_concurrent_ops() -> usize { 10 }
-fn def_rate_limit() -> usize { 60 }
-fn def_escalation() -> String { "ask-user".into() }
+fn def_restrict_level() -> String {
+    "standard".into()
+}
+fn def_max_concurrent_ops() -> usize {
+    10
+}
+fn def_rate_limit() -> usize {
+    60
+}
+fn def_escalation() -> String {
+    "ask-user".into()
+}
 
 impl Default for PermissionPolicyConfig {
     fn default() -> Self {
         Self {
             default_restriction_level: def_restrict_level(),
-            require_approval_tools: vec![
-                "bash".into(), "write_file".into(), "edit_file".into(),
-            ],
+            require_approval_tools: vec!["bash".into(), "write_file".into(), "edit_file".into()],
             auto_approve_tools: vec![
-                "read_file".into(), "glob_search".into(), "grep_search".into(),
+                "read_file".into(),
+                "glob_search".into(),
+                "grep_search".into(),
             ],
             forbidden_tools: vec![],
             max_concurrent_operations: def_max_concurrent_ops(),
@@ -332,6 +483,8 @@ pub struct LabConfig {
 
 impl Default for LabConfig {
     fn default() -> Self {
+        Self::initialize_process_env();
+
         let mut cfg = Self {
             workspace: default_workspace(),
             sessions_dir: def_sessions(),
@@ -353,9 +506,7 @@ impl Default for LabConfig {
             provider: def_provider(),
             base_url: def_base_url(),
             model: def_model(),
-            api_key: std::env::var("ANTHROPIC_API_KEY")
-                .or_else(|_| std::env::var("OPENAI_API_KEY"))
-                .unwrap_or_default(),
+            api_key: String::new(),
             fallback_models: Vec::new(),
             use_ai: false,
             memory_persistence: def_true(),
@@ -373,21 +524,56 @@ impl Default for LabConfig {
 }
 
 impl LabConfig {
+    pub fn initialize_process_env() {
+        ENV_INIT.call_once(|| {
+            let _ = dotenvy::dotenv_override();
+
+            if let Some(workspace) = env_non_empty("LAB_WORKSPACE") {
+                let workspace_env = PathBuf::from(workspace).join(".env");
+                if workspace_env.exists() {
+                    let _ = dotenvy::from_path_override(&workspace_env);
+                }
+            }
+        });
+    }
+
     /// Create config with a specific workspace.
     pub fn with_workspace(path: PathBuf) -> Self {
-        let mut cfg = Self { workspace: path, ..Self::default() };
+        let cfg = Self {
+            workspace: path,
+            ..Self::default()
+        };
         cfg.ensure_directories();
         cfg
     }
 
     /// Apply LAB_* environment variable overrides.
+    /// Priority: LAB_PROVIDER (explicit) > auto-detect from API key env vars.
     fn apply_env_overrides(&mut self) {
-        if let Ok(v) = std::env::var("LAB_PROVIDER") { self.provider = v; }
-        if let Ok(v) = std::env::var("LAB_MODEL") { self.model = v; }
-        if let Ok(v) = std::env::var("LAB_BASE_URL") { self.base_url = v; }
-        if let Ok(v) = std::env::var("LAB_API_KEY") { self.api_key = v; }
-        if let Ok(v) = std::env::var("LAB_DEBUG") { self.debug_mode = v == "true" || v == "1"; }
-        if let Ok(v) = std::env::var("LAB_VERBOSE") { self.verbose_logging = v == "true" || v == "1"; }
+        let explicit_provider = env_non_empty("LAB_PROVIDER");
+        let explicit_model = env_non_empty("LAB_MODEL");
+        let explicit_base_url = env_non_empty("LAB_BASE_URL");
+
+        if let Some(provider) = explicit_provider {
+            self.provider = provider;
+        } else if let Some(provider) = detect_provider_from_env() {
+            self.provider = provider.to_string();
+        }
+
+        self.model =
+            explicit_model.unwrap_or_else(|| provider_default_model(&self.provider).to_string());
+        self.base_url = explicit_base_url
+            .unwrap_or_else(|| provider_default_base_url(&self.provider).to_string());
+        self.api_key = env_non_empty("LAB_API_KEY")
+            .or_else(|| provider_api_env_key(&self.provider).and_then(env_non_empty))
+            .unwrap_or_default();
+
+        if let Ok(v) = std::env::var("LAB_DEBUG") {
+            self.debug_mode = v == "true" || v == "1";
+        }
+        if let Ok(v) = std::env::var("LAB_VERBOSE") {
+            self.verbose_logging = v == "true" || v == "1";
+        }
         if let Ok(v) = std::env::var("LAB_WORKSPACE") {
             self.workspace = PathBuf::from(v);
             self.ensure_directories();
@@ -397,11 +583,27 @@ impl LabConfig {
         }
     }
 
+    pub fn requires_api_key(&self) -> bool {
+        !provider_supports_keyless_access(&self.provider)
+    }
+
+    pub fn llm_configured(&self) -> bool {
+        provider_supports_keyless_access(&self.provider) || !self.api_key.is_empty()
+    }
+
+    pub fn expected_api_key_env(&self) -> Option<&'static str> {
+        provider_api_env_key(&self.provider)
+    }
+
     /// Ensure all required directories exist.
     pub fn ensure_directories(&self) {
         for dir in &[
-            &self.sessions_dir, &self.memory_dir, &self.outputs_dir,
-            &self.skills_dir, &self.audits_dir, &self.cache_dir,
+            &self.sessions_dir,
+            &self.memory_dir,
+            &self.outputs_dir,
+            &self.skills_dir,
+            &self.audits_dir,
+            &self.cache_dir,
         ] {
             let full: PathBuf = if dir.is_absolute() {
                 (*dir).clone()
@@ -423,12 +625,15 @@ impl LabConfig {
 
     /// Get an agent profile by name, falling back to default.
     pub fn get_agent_profile(&self, name: &str) -> &AgentProfile {
-        self.agent_profiles.get(name).unwrap_or(&self.default_agent_profile)
+        self.agent_profiles
+            .get(name)
+            .unwrap_or(&self.default_agent_profile)
     }
 
     /// Save configuration to a TOML file.
     pub fn save(&self, path: Option<&PathBuf>) -> std::io::Result<()> {
-        let save_path = path.cloned()
+        let save_path = path
+            .cloned()
             .unwrap_or_else(|| self.workspace.join("lab-config.toml"));
         let content = toml::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -451,31 +656,81 @@ impl LabConfig {
     }
 
     fn apply_from_file(&mut self, file: &LabConfigFile) {
-        if let Some(v) = &file.workspace { self.workspace = PathBuf::from(v); }
-        if let Some(v) = &file.sessions_dir { self.sessions_dir = PathBuf::from(v); }
-        if let Some(v) = &file.memory_dir { self.memory_dir = PathBuf::from(v); }
-        if let Some(v) = &file.outputs_dir { self.outputs_dir = PathBuf::from(v); }
-        if let Some(v) = &file.skills_dir { self.skills_dir = PathBuf::from(v); }
-        if let Some(v) = &file.audits_dir { self.audits_dir = PathBuf::from(v); }
-        if let Some(v) = &file.cache_dir { self.cache_dir = PathBuf::from(v); }
-        if let Some(v) = file.max_agents { self.max_agents = v; }
-        if let Some(v) = file.max_concurrent_tasks { self.max_concurrent_tasks = v; }
-        if let Some(v) = file.default_timeout { self.default_timeout = v; }
-        if let Some(v) = file.debug_mode { self.debug_mode = v; }
-        if let Some(v) = file.verbose_logging { self.verbose_logging = v; }
-        if let Some(v) = file.enable_profiling { self.enable_profiling = v; }
-        if let Some(ref v) = file.provider { self.provider = v.clone(); }
-        if let Some(ref v) = file.base_url { self.base_url = v.clone(); }
-        if let Some(ref v) = file.model { self.model = v.clone(); }
-        if let Some(ref v) = file.api_key { self.api_key = v.clone(); }
-        if let Some(v) = file.use_ai { self.use_ai = v; }
-        if let Some(v) = file.memory_persistence { self.memory_persistence = v; }
-        if let Some(ref v) = file.memory_backend { self.memory_backend = v.clone(); }
-        if let Some(v) = file.memory_max_entries { self.memory_max_entries = v; }
-        if let Some(v) = file.memory_ttl_seconds { self.memory_ttl_seconds = v; }
-        if let Some(ref v) = file.web_search_engine { self.web_search_engine = v.clone(); }
-        if let Some(v) = file.web_rate_limit { self.web_rate_limit = v; }
-        if let Some(v) = file.web_timeout_seconds { self.web_timeout_secs = v; }
+        if let Some(v) = &file.workspace {
+            self.workspace = PathBuf::from(v);
+        }
+        if let Some(v) = &file.sessions_dir {
+            self.sessions_dir = PathBuf::from(v);
+        }
+        if let Some(v) = &file.memory_dir {
+            self.memory_dir = PathBuf::from(v);
+        }
+        if let Some(v) = &file.outputs_dir {
+            self.outputs_dir = PathBuf::from(v);
+        }
+        if let Some(v) = &file.skills_dir {
+            self.skills_dir = PathBuf::from(v);
+        }
+        if let Some(v) = &file.audits_dir {
+            self.audits_dir = PathBuf::from(v);
+        }
+        if let Some(v) = &file.cache_dir {
+            self.cache_dir = PathBuf::from(v);
+        }
+        if let Some(v) = file.max_agents {
+            self.max_agents = v;
+        }
+        if let Some(v) = file.max_concurrent_tasks {
+            self.max_concurrent_tasks = v;
+        }
+        if let Some(v) = file.default_timeout {
+            self.default_timeout = v;
+        }
+        if let Some(v) = file.debug_mode {
+            self.debug_mode = v;
+        }
+        if let Some(v) = file.verbose_logging {
+            self.verbose_logging = v;
+        }
+        if let Some(v) = file.enable_profiling {
+            self.enable_profiling = v;
+        }
+        if let Some(ref v) = file.provider {
+            self.provider = v.clone();
+        }
+        if let Some(ref v) = file.base_url {
+            self.base_url = v.clone();
+        }
+        if let Some(ref v) = file.model {
+            self.model = v.clone();
+        }
+        if let Some(ref v) = file.api_key {
+            self.api_key = v.clone();
+        }
+        if let Some(v) = file.use_ai {
+            self.use_ai = v;
+        }
+        if let Some(v) = file.memory_persistence {
+            self.memory_persistence = v;
+        }
+        if let Some(ref v) = file.memory_backend {
+            self.memory_backend = v.clone();
+        }
+        if let Some(v) = file.memory_max_entries {
+            self.memory_max_entries = v;
+        }
+        if let Some(v) = file.memory_ttl_seconds {
+            self.memory_ttl_seconds = v;
+        }
+        if let Some(ref v) = file.web_search_engine {
+            self.web_search_engine = v.clone();
+        }
+        if let Some(v) = file.web_rate_limit {
+            self.web_rate_limit = v;
+        }
+        if let Some(v) = file.web_timeout_seconds {
+            self.web_timeout_secs = v;
+        }
     }
 
     /// Convert to a serializable dict (for JSON output).

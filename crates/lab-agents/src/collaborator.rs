@@ -5,12 +5,10 @@ use crate::coder::CoderAgent;
 use crate::researcher::ResearcherAgent;
 use crate::reviewer::ReviewerAgent;
 use crate::summarizer::SummarizerAgent;
-use lab_core::types::AgentResult;
 use lab_core::llm::LLMClient;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde::Serialize;
 use std::time::Instant;
 use tracing::{info, warn};
 
@@ -116,7 +114,16 @@ impl MultiAgentCollaborator {
         // Phase 1: Research — always runs
         let phase_start = Instant::now();
         let research_result = researcher
-            .execute(registry, memory, "analyze codebase", pattern, path, None, llm, model)
+            .execute(
+                registry,
+                memory,
+                "analyze codebase",
+                pattern,
+                path,
+                None,
+                llm,
+                model,
+            )
             .await;
 
         phases.push(PhaseResult {
@@ -130,10 +137,17 @@ impl MultiAgentCollaborator {
 
         if !research_result.success {
             self.status = status::FAILED.to_string();
-            return self.finish(phases, start.elapsed().as_secs_f64(), "Research phase failed".into());
+            return self.finish(
+                phases,
+                start.elapsed().as_secs_f64(),
+                "Research phase failed".into(),
+            );
         }
 
-        info!("Collaborator: Research phase completed ({:.1}s)", phases[0].duration_secs);
+        info!(
+            "Collaborator: Research phase completed ({:.1}s)",
+            phases[0].duration_secs
+        );
 
         // Phase 2: Review — optional
         if self.run_review {
@@ -146,7 +160,16 @@ impl MultiAgentCollaborator {
             );
 
             let review_result = reviewer
-                .execute(registry, memory, "review code quality", pattern, path, None, llm, model)
+                .execute(
+                    registry,
+                    memory,
+                    "review code quality",
+                    pattern,
+                    path,
+                    None,
+                    llm,
+                    model,
+                )
                 .await;
 
             phases.push(PhaseResult {
@@ -174,7 +197,16 @@ impl MultiAgentCollaborator {
             );
 
             let code_result = coder
-                .execute(registry, memory, "generate boilerplate", None, None, Some("module"), None, None)
+                .execute(
+                    registry,
+                    memory,
+                    "generate boilerplate",
+                    None,
+                    None,
+                    Some("module"),
+                    llm,
+                    model,
+                )
                 .await;
 
             phases.push(PhaseResult {
@@ -198,7 +230,14 @@ impl MultiAgentCollaborator {
             );
 
             let summary_result = summarizer
-                .execute(registry, memory, "generate summary", Some("lab-outputs/collaboration-summary.md"), None, None)
+                .execute(
+                    registry,
+                    memory,
+                    "generate summary",
+                    Some("lab-outputs/collaboration-summary.md"),
+                    llm,
+                    model,
+                )
                 .await;
 
             phases.push(PhaseResult {
@@ -227,12 +266,7 @@ impl MultiAgentCollaborator {
         }
     }
 
-    fn finish(
-        &self,
-        phases: Vec<PhaseResult>,
-        total_secs: f64,
-        error: String,
-    ) -> WorkflowResult {
+    fn finish(&self, phases: Vec<PhaseResult>, total_secs: f64, error: String) -> WorkflowResult {
         WorkflowResult {
             status: self.status.clone(),
             phases,
@@ -269,16 +303,14 @@ mod tests {
     fn workflow_result_success() {
         let wr = WorkflowResult {
             status: status::COMPLETED.to_string(),
-            phases: vec![
-                PhaseResult {
-                    name: "research".into(),
-                    success: true,
-                    data: serde_json::json!({}),
-                    duration_secs: 1.0,
-                    agent_id: "r1".into(),
-                    error: String::new(),
-                },
-            ],
+            phases: vec![PhaseResult {
+                name: "research".into(),
+                success: true,
+                data: serde_json::json!({}),
+                duration_secs: 1.0,
+                agent_id: "r1".into(),
+                error: String::new(),
+            }],
             total_duration_secs: 1.0,
             error: String::new(),
         };

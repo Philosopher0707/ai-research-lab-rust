@@ -2,16 +2,21 @@
 //! Mirrors reports/workflow_report.py from Python project.
 
 use lab_core::workflows::{StepResult, StepStatus, WorkflowExecution};
-use serde::{Deserialize, Serialize};
 
 /// Generates self-contained HTML reports with SVG charts and status badges.
 pub struct ReportGenerator;
 
 impl ReportGenerator {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Generate an HTML report for a single workflow execution.
-    pub fn generate_workflow_report(&self, execution: &WorkflowExecution, title: Option<&str>) -> String {
+    pub fn generate_workflow_report(
+        &self,
+        execution: &WorkflowExecution,
+        title: Option<&str>,
+    ) -> String {
         let title = title.unwrap_or(&execution.workflow_name);
         let status_badge = match execution.status.as_str() {
             "completed" => self.badge("Completed", "4CAF50", "white"),
@@ -20,7 +25,11 @@ impl ReportGenerator {
             _ => self.badge(&execution.status, "607D8B", "white"),
         };
 
-        let steps_html: String = execution.step_results.iter().map(|step| self.step_row(step)).collect();
+        let steps_html: String = execution
+            .step_results
+            .iter()
+            .map(|step| self.step_row(step))
+            .collect();
 
         let total_duration = execution.total_duration_secs;
 
@@ -69,22 +78,29 @@ tr:last-child td {{ border-bottom: none; }}
     }
 
     /// Generate an HTML summary for multiple workflow executions.
-    pub fn generate_batch_report(&self, executions: &[WorkflowExecution], title: Option<&str>) -> String {
+    pub fn generate_batch_report(
+        &self,
+        executions: &[WorkflowExecution],
+        title: Option<&str>,
+    ) -> String {
         let title = title.unwrap_or("Workflow Batch Report");
-        let rows: String = executions.iter().map(|e| {
-            let status_badge = match e.status.as_str() {
-                "completed" => self.badge("Completed", "4CAF50", "white"),
-                "failed" => self.badge("Failed", "f44336", "white"),
-                _ => self.badge(&e.status, "607D8B", "white"),
-            };
-            format!(
-                r#"<tr><td>{}</td><td>{}</td><td>{:.1}s</td><td>{}</td></tr>"#,
-                e.workflow_name,
-                status_badge,
-                e.total_duration_secs,
-                e.step_results.len(),
-            )
-        }).collect();
+        let rows: String = executions
+            .iter()
+            .map(|e| {
+                let status_badge = match e.status.as_str() {
+                    "completed" => self.badge("Completed", "4CAF50", "white"),
+                    "failed" => self.badge("Failed", "f44336", "white"),
+                    _ => self.badge(&e.status, "607D8B", "white"),
+                };
+                format!(
+                    r#"<tr><td>{}</td><td>{}</td><td>{:.1}s</td><td>{}</td></tr>"#,
+                    e.workflow_name,
+                    status_badge,
+                    e.total_duration_secs,
+                    e.step_results.len(),
+                )
+            })
+            .collect();
 
         format!(
             r#"<!DOCTYPE html>
@@ -126,15 +142,15 @@ td {{ padding: 0.75rem 1rem; border-bottom: 1px solid #eee; }}
             _ => self.badge("Pending", "b0bec5", "white"),
         };
         let error_html = match &step.error {
-            Some(err) => format!(r#"<span class="error-text">{}</span>"#, self.escape_html(err)),
+            Some(err) => format!(
+                r#"<span class="error-text">{}</span>"#,
+                self.escape_html(err)
+            ),
             None => String::new(),
         };
         format!(
             r#"<tr><td>{}</td><td>{}</td><td>{:.2}s</td><td>{}</td></tr>"#,
-            step.step_id,
-            status_badge,
-            step.duration_secs,
-            error_html,
+            step.step_id, status_badge, step.duration_secs, error_html,
         )
     }
 
@@ -147,7 +163,9 @@ td {{ padding: 0.75rem 1rem; border-bottom: 1px solid #eee; }}
 }
 
 impl Default for ReportGenerator {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -162,16 +180,14 @@ mod tests {
             workflow_name: "Test Workflow".into(),
             execution_id: "exec-1".into(),
             status: "completed".into(),
-            step_results: vec![
-                StepResult {
-                    step_id: "step-1".into(),
-                    status: StepStatus::Completed,
-                    outcome: Some(lab_core::workflows::StepOutcome::Success),
-                    result: None,
-                    error: None,
-                    duration_secs: 1.5,
-                },
-            ],
+            step_results: vec![StepResult {
+                step_id: "step-1".into(),
+                status: StepStatus::Completed,
+                outcome: Some(lab_core::workflows::StepOutcome::Success),
+                result: None,
+                error: None,
+                duration_secs: 1.5,
+            }],
             total_duration_secs: 2.3,
             started_at: chrono::Utc::now().to_rfc3339(),
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
@@ -192,16 +208,14 @@ mod tests {
             workflow_name: "Failing Workflow".into(),
             execution_id: "exec-1".into(),
             status: "failed".into(),
-            step_results: vec![
-                StepResult {
-                    step_id: "step-1".into(),
-                    status: StepStatus::Failed,
-                    outcome: Some(lab_core::workflows::StepOutcome::Error),
-                    result: None,
-                    error: Some("Connection refused".into()),
-                    duration_secs: 0.3,
-                },
-            ],
+            step_results: vec![StepResult {
+                step_id: "step-1".into(),
+                status: StepStatus::Failed,
+                outcome: Some(lab_core::workflows::StepOutcome::Error),
+                result: None,
+                error: Some("Connection refused".into()),
+                duration_secs: 0.3,
+            }],
             total_duration_secs: 0.3,
             started_at: chrono::Utc::now().to_rfc3339(),
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
@@ -215,6 +229,9 @@ mod tests {
     #[test]
     fn escape_html_works() {
         let gen = ReportGenerator::new();
-        assert_eq!(gen.escape_html("<script>alert('xss')</script>"), "&lt;script&gt;alert('xss')&lt;/script&gt;");
+        assert_eq!(
+            gen.escape_html("<script>alert('xss')</script>"),
+            "&lt;script&gt;alert('xss')&lt;/script&gt;"
+        );
     }
 }

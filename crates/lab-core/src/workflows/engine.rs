@@ -3,7 +3,7 @@
 //! Mirrors core/workflows/engine.py (730 lines — partial implementation)
 
 use crate::errors::{LabError, Result};
-use crate::scheduler::models::{TaskPriority, TaskStatus, TaskType};
+use crate::scheduler::models::{TaskPriority, TaskType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -152,9 +152,10 @@ impl Workflow {
         for (step_id, step) in &self.steps {
             for dep in &step.depends_on {
                 if !self.steps.contains_key(dep) {
-                    return Err(LabError::WorkflowError(
-                        format!("Step '{}' depends on unknown step '{}'", step_id, dep),
-                    ));
+                    return Err(LabError::WorkflowError(format!(
+                        "Step '{}' depends on unknown step '{}'",
+                        step_id, dep
+                    )));
                 }
             }
         }
@@ -198,9 +199,7 @@ impl Workflow {
         }
 
         if sorted.len() < self.steps.len() {
-            Err(LabError::WorkflowError(
-                "Workflow contains a cycle".into(),
-            ))
+            Err(LabError::WorkflowError("Workflow contains a cycle".into()))
         } else {
             Ok(sorted)
         }
@@ -259,14 +258,20 @@ pub struct TemplateStep {
 }
 
 impl WorkflowTemplate {
-    pub fn instantiate(&self, name: &str, params: Option<&HashMap<String, serde_json::Value>>) -> Workflow {
+    pub fn instantiate(
+        &self,
+        name: &str,
+        params: Option<&HashMap<String, serde_json::Value>>,
+    ) -> Workflow {
         let mut workflow = Workflow::new(name);
         let params = params.cloned().unwrap_or_default();
 
         for tstep in &self.steps {
             // Simple string interpolation for task templates
-            let task_string = tstep.task_string_template
-                .replace("{topic}", params.get("topic").and_then(|v| v.as_str()).unwrap_or(""));
+            let task_string = tstep.task_string_template.replace(
+                "{topic}",
+                params.get("topic").and_then(|v| v.as_str()).unwrap_or(""),
+            );
 
             workflow.add_step(
                 &tstep.id,
@@ -414,16 +419,24 @@ pub fn register_builtin_templates(registry: &mut TemplateRegistry) {
 pub struct WorkflowEngine;
 
 impl WorkflowEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Execute a workflow step-by-step (sequential by default).
     /// Parallel execution requires integration with TaskQueue.
     pub async fn execute(
         &self,
-        mut workflow: Workflow,
-        executor: impl Fn(&WorkflowStep, &HashMap<String, serde_json::Value>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>> + Send + Sync,
-        session_id: Option<&str>,
-        params: HashMap<String, serde_json::Value>,
+        workflow: Workflow,
+        executor: impl Fn(
+                &WorkflowStep,
+                &HashMap<String, serde_json::Value>,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send>,
+            > + Send
+            + Sync,
+        _session_id: Option<&str>,
+        _params: HashMap<String, serde_json::Value>,
     ) -> Result<WorkflowExecution> {
         workflow.validate()?;
 
@@ -466,7 +479,10 @@ impl WorkflowEngine {
 
             // Check if any dependency failed
             let deps_failed = step.depends_on.iter().any(|d| {
-                results.get(d).map(|r| r.status == StepStatus::Failed || r.status == StepStatus::Skipped).unwrap_or(false)
+                results
+                    .get(d)
+                    .map(|r| r.status == StepStatus::Failed || r.status == StepStatus::Skipped)
+                    .unwrap_or(false)
             });
 
             if deps_failed && step.skip_on_failure {
@@ -487,28 +503,35 @@ impl WorkflowEngine {
             let exec_fn = executor(step, &context);
             match exec_fn.await {
                 Ok(result) => {
-                    results.insert(step_id.clone(), StepResult {
-                        step_id: step_id.clone(),
-                        status: StepStatus::Completed,
-                        outcome: Some(StepOutcome::Success),
-                        result: Some(result.clone()),
-                        error: None,
-                        duration_secs: start.elapsed().as_secs_f64(),
-                    });
+                    results.insert(
+                        step_id.clone(),
+                        StepResult {
+                            step_id: step_id.clone(),
+                            status: StepStatus::Completed,
+                            outcome: Some(StepOutcome::Success),
+                            result: Some(result.clone()),
+                            error: None,
+                            duration_secs: start.elapsed().as_secs_f64(),
+                        },
+                    );
                     context.insert(step_id.clone(), result);
                 }
                 Err(e) => {
-                    results.insert(step_id.clone(), StepResult {
-                        step_id: step_id.clone(),
-                        status: StepStatus::Failed,
-                        outcome: Some(StepOutcome::Error),
-                        result: None,
-                        error: Some(e.to_string()),
-                        duration_secs: start.elapsed().as_secs_f64(),
-                    });
-                    return Err(LabError::WorkflowError(
-                        format!("Step '{}' failed: {}", step_id, e),
-                    ));
+                    results.insert(
+                        step_id.clone(),
+                        StepResult {
+                            step_id: step_id.clone(),
+                            status: StepStatus::Failed,
+                            outcome: Some(StepOutcome::Error),
+                            result: None,
+                            error: Some(e.to_string()),
+                            duration_secs: start.elapsed().as_secs_f64(),
+                        },
+                    );
+                    return Err(LabError::WorkflowError(format!(
+                        "Step '{}' failed: {}",
+                        step_id, e
+                    )));
                 }
             }
         }
@@ -518,26 +541,42 @@ impl WorkflowEngine {
             .filter_map(|id| results.get(id).cloned())
             .collect();
 
-        let all_success = step_results.iter().all(|r| r.status == StepStatus::Completed || r.status == StepStatus::Skipped);
+        let all_success = step_results
+            .iter()
+            .all(|r| r.status == StepStatus::Completed || r.status == StepStatus::Skipped);
 
         Ok(WorkflowExecution {
-            status: if all_success { "completed".into() } else { "failed".into() },
+            status: if all_success {
+                "completed".into()
+            } else {
+                "failed".into()
+            },
             step_results,
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
             total_duration_secs: chrono::Utc::now()
                 .signed_duration_since(
-                    chrono::DateTime::parse_from_rfc3339(&execution.started_at).unwrap_or_else(|_| chrono::DateTime::<chrono::FixedOffset>::from(chrono::Utc::now()))
+                    chrono::DateTime::parse_from_rfc3339(&execution.started_at).unwrap_or_else(
+                        |_| chrono::DateTime::<chrono::FixedOffset>::from(chrono::Utc::now()),
+                    ),
                 )
-                .num_milliseconds() as f64 / 1000.0,
+                .num_milliseconds() as f64
+                / 1000.0,
             ..execution
         })
     }
 
-    fn evaluate_condition(&self, condition: &Condition, results: &HashMap<String, StepResult>) -> bool {
+    fn evaluate_condition(
+        &self,
+        condition: &Condition,
+        results: &HashMap<String, StepResult>,
+    ) -> bool {
         match condition.cond_type.as_str() {
             "step_success" => {
                 if let Some(ref step_id) = condition.step_id {
-                    results.get(step_id).map(|r| r.status == StepStatus::Completed).unwrap_or(false)
+                    results
+                        .get(step_id)
+                        .map(|r| r.status == StepStatus::Completed)
+                        .unwrap_or(false)
                 } else {
                     false
                 }
