@@ -78,6 +78,12 @@ pub struct AgentFactoryRegistry {
     plugins: Vec<(String, String)>,
 }
 
+impl Default for AgentFactoryRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentFactoryRegistry {
     pub fn new() -> Self {
         Self {

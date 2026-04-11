@@ -294,6 +294,12 @@ pub struct TemplateRegistry {
     templates: HashMap<String, WorkflowTemplate>,
 }
 
+impl Default for TemplateRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TemplateRegistry {
     pub fn new() -> Self {
         Self {
@@ -417,6 +423,12 @@ pub fn register_builtin_templates(registry: &mut TemplateRegistry) {
 /// For full async parallel execution with task queue integration,
 /// the engine is called from ResearchLab.run_workflow().
 pub struct WorkflowEngine;
+
+impl Default for WorkflowEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WorkflowEngine {
     pub fn new() -> Self {

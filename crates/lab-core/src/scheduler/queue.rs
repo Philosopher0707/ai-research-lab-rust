@@ -266,9 +266,7 @@ impl TaskQueue {
         }
 
         // Pop and execute
-        let Some(task) = self.queue.pop() else {
-            return None;
-        };
+        let task = self.queue.pop()?;
         if task.status == TaskStatus::Cancelled {
             return None;
         }

@@ -175,7 +175,7 @@ The output will be written directly to a file.";
             }
         } else if let Some(tmpl) = template {
             // Template generation mode
-            let name = tmpl.replace('_', " ").replace('-', " ");
+            let name = tmpl.replace(['_', '-'], " ");
             let output_path = format!("src/{name}.py");
             let template_content = format!("\"\"\"{name} module.\"\"\"\n\nfrom __future__ import annotations\n\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n\ndef main() -> None:\n    \"\"\"Entry point for {name}.\"\"\"\n    logger.info(\"{name} running\")\n\n\nif __name__ == \"__main__\":\n    main()\n");
 

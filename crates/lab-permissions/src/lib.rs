@@ -10,19 +10,14 @@ use std::time::Instant;
 
 // ─── Restriction Levels ─────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestrictionLevel {
     FullRestrict,
     ReadOnly,
+    #[default]
     SafeTools,
     FullAccess,
-}
-
-impl Default for RestrictionLevel {
-    fn default() -> Self {
-        Self::SafeTools
-    }
 }
 
 /// Map from config-level strings to RestrictionLevel

@@ -119,11 +119,7 @@ impl MemoryWorkspace {
         value: &serde_json::Value,
         tags: Option<Vec<String>>,
     ) -> MemoryEntry {
-        let vec = if let Some(text) = value.as_str() {
-            Some(Self::text_to_vector(text, DIMS))
-        } else {
-            None
-        };
+        let vec = value.as_str().map(|text| Self::text_to_vector(text, DIMS));
 
         let entry = MemoryEntry {
             key: key.to_string(),
