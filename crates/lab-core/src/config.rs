@@ -1,5 +1,10 @@
-//! Full lab configuration: LabConfig, AgentProfile, PipelineConfig, PermissionPolicyConfig.
-//! Mirrors core/lab/config.py (274 lines) with env override + TOML/YAML load/save.
+//! Configuration management for the AI Research Lab.
+//!
+//! This module defines the core configuration structures (`LabConfig`, `AgentProfile`,
+//! `PipelineConfig`, `PermissionPolicyConfig`) and provides utilities for loading,
+//! saving, and overriding configuration via environment variables and TOML/YAML files.
+//! It mirrors the Python implementation in `core/lab/config.py` while adding Rust-specific
+//! features like strong typing and environment-aware defaults.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
