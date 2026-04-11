@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
         }) => commands::cmd_pipeline_run(&pattern, path.as_deref(), no_review, no_code).await,
         Some(Commands::Ask { question }) => commands::cmd_ask_once(&question).await,
         Some(Commands::Serve { port }) => commands::cmd_serve(port).await,
-        Some(Commands::Tools) => commands::cmd_tools(),
+        Some(Commands::Tools) => commands::cmd_tools().await,
         Some(Commands::List) => commands::cmd_list().await,
         Some(Commands::Clear { yes }) => commands::cmd_clear(yes),
         Some(Commands::Status) => commands::cmd_status().await,

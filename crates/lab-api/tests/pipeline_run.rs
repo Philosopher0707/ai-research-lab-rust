@@ -54,6 +54,7 @@ async fn pipeline_run_endpoint_executes_and_persists_results() {
     let lab = server.state.lab.read().await;
     let session = lab
         .list_sessions()
+        .await
         .into_iter()
         .find(|session| session.name == "pipeline-review")
         .unwrap();

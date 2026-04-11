@@ -28,7 +28,7 @@ struct PipelineExecutionContext {
 
 impl PipelineExecutionContext {
     async fn begin(state: &Arc<AppState>, pipeline_name: &str) -> Result<Self, Response> {
-        let mut lab = state.lab.write().await;
+        let lab = state.lab.read().await;
         match lab.begin_pipeline_run(pipeline_name).await {
             Ok(session_id) => Ok(Self {
                 config: lab.config.clone(),
@@ -46,7 +46,7 @@ impl PipelineExecutionContext {
     ) -> Response {
         let result_value =
             serde_json::to_value(&result).unwrap_or_else(|_| pipeline_result_summary(&result));
-        let mut lab = state.lab.write().await;
+        let lab = state.lab.read().await;
 
         match lab
             .finish_pipeline_run(&self.session_id, &self.pipeline_name, &result_value)
@@ -121,9 +121,9 @@ pub async fn create_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Response {
-    let mut lab = state.lab.write().await;
+    let lab = state.lab.read().await;
     match lab.create_session(&req.name).await {
-        Ok(session) => (StatusCode::CREATED, Json(session_response(session))).into_response(),
+        Ok(session) => (StatusCode::CREATED, Json(session_response(&session))).into_response(),
         Err(error) => internal_error_response(error),
     }
 }
@@ -132,8 +132,9 @@ pub async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoRespo
     let lab = state.lab.read().await;
     let sessions: Vec<_> = lab
         .list_sessions()
+        .await
         .iter()
-        .map(|session| session_response(session))
+        .map(session_response)
         .collect();
     Json(sessions)
 }
@@ -143,8 +144,8 @@ pub async fn get_session(
     Path(session_id): Path<String>,
 ) -> Response {
     let lab = state.lab.read().await;
-    match lab.get_session(&session_id) {
-        Some(session) => (StatusCode::OK, Json(session_response(session))).into_response(),
+    match lab.get_session(&session_id).await {
+        Some(session) => (StatusCode::OK, Json(session_response(&session))).into_response(),
         None => json_error(StatusCode::NOT_FOUND, "Session not found"),
     }
 }
@@ -153,7 +154,7 @@ pub async fn close_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Response {
-    let mut lab = state.lab.write().await;
+    let lab = state.lab.read().await;
     match lab.close_session(&session_id).await {
         Ok(()) => (
             StatusCode::OK,
@@ -166,14 +167,14 @@ pub async fn close_session(
 
 pub async fn list_tools(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let lab = state.lab.read().await;
-    Json(lab.tools().list_tools())
+    Json(lab.list_tools().await)
 }
 
 pub async fn execute_tool(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ToolRequest>,
 ) -> impl IntoResponse {
-    let mut lab = state.lab.write().await;
+    let lab = state.lab.read().await;
     Json(lab.execute_tool(&req.tool_name, req.params, None).await)
 }
 
@@ -189,7 +190,7 @@ pub async fn list_memory(
             .collect::<Vec<_>>()
     });
     let lab = state.lab.read().await;
-    let keys = lab.memory().list_keys(&session_id, tags.as_deref());
+    let keys = lab.list_memory_keys(&session_id, tags.as_deref());
     Json(serde_json::json!({"keys": keys}))
 }
 
@@ -197,13 +198,8 @@ pub async fn store_memory(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MemoryRequest>,
 ) -> impl IntoResponse {
-    let mut lab = state.lab.write().await;
-    let entry = lab.memory_mut().store(
-        &req.session_id,
-        &req.key,
-        &req.value,
-        Some(req.tags.clone()),
-    );
+    let lab = state.lab.read().await;
+    let entry = lab.store_memory(&req.session_id, &req.key, &req.value, Some(req.tags.clone()));
     Json(MemoryResponse {
         key: entry.key,
         value: entry.value,
@@ -222,12 +218,12 @@ pub async fn search_memory(
         .and_then(|value| value.parse().ok())
         .unwrap_or(10);
     let lab = state.lab.read().await;
-    Json(lab.memory().search(&session_id, &query, None, limit))
+    Json(lab.search_memory(&session_id, &query, None, limit))
 }
 
 pub async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let lab = state.lab.read().await;
-    Json(lab.get_stats())
+    Json(lab.get_stats().await)
 }
 
 pub async fn event_history(
@@ -266,7 +262,7 @@ pub async fn run_workflow(
     State(state): State<Arc<AppState>>,
     Json(req): Json<WorkflowRunRequest>,
 ) -> Response {
-    let mut lab = state.lab.write().await;
+    let lab = state.lab.read().await;
     match lab
         .run_workflow_from_template(
             &req.template,
@@ -337,14 +333,9 @@ pub async fn run_agent(
     };
 
     {
-        let mut lab = state.lab.write().await;
+        let lab = state.lab.read().await;
         let key = format!("agent_result_{agent_id}");
-        lab.memory_mut().store(
-            &req.session_id,
-            &key,
-            &result.data,
-            Some(vec!["agent_result".into()]),
-        );
+        lab.store_memory(&req.session_id, &key, &result.data, Some(vec!["agent_result".into()]));
     }
 
     (

@@ -12,9 +12,9 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: LabConfig) -> Self {
-        let mut lab = ResearchLab::new(config);
+        let lab = ResearchLab::new(config);
         lab.start().await.expect("Failed to start lab");
-        lab.restore_sessions();
+        lab.restore_sessions().await;
 
         let events = lab.event_bus_arc();
 

@@ -12,11 +12,12 @@ use std::sync::Arc;
 
 pub(crate) async fn cmd_chat() -> anyhow::Result<()> {
     let config = LabConfig::default();
-    let mut lab = ResearchLab::new(config.clone());
+    let lab = ResearchLab::new(config.clone());
     with_spinner("Booting workspace", lab.start()).await?;
     print_chat_header(&config, lab.has_llm());
 
-    let system_prompt = build_agent_system_prompt(&lab, &config);
+    let tool_list = lab.tools().list_tools().await;
+    let system_prompt = build_agent_system_prompt(&tool_list, &config);
     let mut history = vec![ChatMessage::system(&system_prompt)];
 
     loop {
@@ -54,7 +55,7 @@ pub(crate) async fn cmd_chat() -> anyhow::Result<()> {
             println!();
             continue;
         } else if input == "/tools" {
-            let _ = cmd_tools();
+            let _ = cmd_tools().await;
             println!();
             continue;
         } else if input == "/report" {
@@ -355,13 +356,13 @@ pub(crate) async fn cmd_serve(port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn cmd_tools() -> anyhow::Result<()> {
+pub(crate) async fn cmd_tools() -> anyhow::Result<()> {
     use crate::ui::category_color;
     use std::collections::BTreeMap;
 
     let config = LabConfig::default();
     let lab = ResearchLab::new(config);
-    let tools = lab.tools().list_tools();
+    let tools = lab.tools().list_tools().await;
 
     println!();
     println!(
@@ -377,7 +378,7 @@ pub(crate) fn cmd_tools() -> anyhow::Result<()> {
     for tool in &tools {
         let cat = tool
             .get("category")
-            .and_then(|v| v.as_str())
+            .and_then(|v: &serde_json::Value| v.as_str())
             .unwrap_or("custom")
             .to_string();
         by_cat.entry(cat).or_default().push(tool);
@@ -496,7 +497,7 @@ pub(crate) async fn cmd_status() -> anyhow::Result<()> {
     print_meta_row("Workspace", lab.config.workspace.display());
     print_meta_row("Provider", provider_display_name(&lab.config.provider));
     print_meta_row("Model", lab.config.model.as_str());
-    print_meta_row("Tools", lab.tools().list_tools().len());
+    print_meta_row("Tools", lab.tools().list_tools().await.len());
     print_meta_row("Sessions", session_record_count(&sessions_dir));
     print_meta_row("Memory", lab.memory().entry_count());
     print_meta_row(
@@ -711,7 +712,7 @@ pub(crate) async fn cmd_memory(
 
 pub(crate) async fn cmd_tool(name: &str, params_json: &str) -> anyhow::Result<()> {
     let config = LabConfig::default();
-    let mut lab = ResearchLab::new(config);
+    let lab = ResearchLab::new(config);
 
     let params: std::collections::HashMap<String, serde_json::Value> =
         match serde_json::from_str(params_json) {
@@ -723,7 +724,7 @@ pub(crate) async fn cmd_tool(name: &str, params_json: &str) -> anyhow::Result<()
         };
 
     // Verify tool exists before showing spinner
-    if lab.tools().get(name).is_none() {
+    if !lab.tools().get(name).await {
         print_error(format!("Tool '{name}' not found. Run `lab tools` to list available tools."));
         return Ok(());
     }
@@ -861,18 +862,17 @@ fn tool_param_hints(name: &str) -> &'static str {
 }
 
 /// Build the full agent system prompt with tool manifest.
-fn build_agent_system_prompt(lab: &ResearchLab, config: &LabConfig) -> String {
+fn build_agent_system_prompt(tools: &[serde_json::Value], config: &LabConfig) -> String {
     use std::collections::BTreeMap;
 
-    let tools = lab.tools().list_tools();
     let project_ctx = build_project_context(config);
 
     // Group tools by category
     let mut by_cat: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for tool in &tools {
-        let name = tool.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-        let desc = tool.get("description").and_then(|v| v.as_str()).unwrap_or("");
-        let cat = tool.get("category").and_then(|v| v.as_str()).unwrap_or("other");
+    for tool in tools {
+        let name = tool.get("name").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("?");
+        let desc = tool.get("description").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("");
+        let cat = tool.get("category").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("other");
         let params = tool_param_hints(name);
         let sig = if params.is_empty() {
             format!("{name}()\n  {desc}")
