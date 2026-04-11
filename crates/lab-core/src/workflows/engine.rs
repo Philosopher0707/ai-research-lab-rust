@@ -166,11 +166,17 @@ impl Workflow {
 
     /// Topological sort for cycle detection.
     fn topological_sort(&self) -> Result<Vec<String>> {
+        // Standard Kahn's algorithm:
+        //   in_degree[id] = number of direct prerequisites of `id`.
+        //   Queue starts with nodes that have no prerequisites (sources).
         let mut in_degree: HashMap<&str, usize> = HashMap::new();
         for (id, step) in &self.steps {
-            in_degree.entry(id.as_str()).or_insert(0);
+            // Ensure every node appears in the map, even with degree 0.
+            let entry = in_degree.entry(id.as_str()).or_insert(0);
+            *entry += step.depends_on.len();
+            // Ensure dependency nodes are in the map too.
             for dep in &step.depends_on {
-                *in_degree.entry(dep.as_str()).or_insert(0) += 1;
+                in_degree.entry(dep.as_str()).or_insert(0);
             }
         }
 

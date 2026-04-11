@@ -66,7 +66,10 @@ impl SessionService {
             .ok_or_else(|| LabError::SessionNotFound(session_id.to_string()))?;
 
         session.status = SessionStatus::Completed;
-        let _ = self.store.lock().await.save(session, None, None)?;
+        // Persist to disk — log failures but don't let them block the event.
+        if let Err(e) = self.store.lock().await.save(session, None, None) {
+            warn!("Failed to persist closed session {}: {}", session_id, e);
+        }
 
         self.event_bus.emit(LabEvent::new(
             "session.closed",
