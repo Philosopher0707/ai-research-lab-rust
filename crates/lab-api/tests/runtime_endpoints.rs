@@ -143,7 +143,7 @@ async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
     let agent_id = agent_response["agent_id"].as_str().unwrap().to_string();
 
     {
-        let lab = server.state.lab.read().await;
+        let lab = &server.state.lab;
         let stored = lab
             .memory()
             .get(&session_id, &format!("agent_result_{agent_id}"))

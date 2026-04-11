@@ -51,7 +51,7 @@ async fn pipeline_run_endpoint_executes_and_persists_results() {
         .any(|stage| { stage["name"] == "report" && stage["status"] == "completed" }));
     assert!(workspace.path().join("lab-outputs/test-report.md").exists());
 
-    let lab = server.state.lab.read().await;
+    let lab = &server.state.lab;
     let session = lab
         .list_sessions()
         .await

@@ -28,7 +28,7 @@ struct PipelineExecutionContext {
 
 impl PipelineExecutionContext {
     async fn begin(state: &Arc<AppState>, pipeline_name: &str) -> Result<Self, Response> {
-        let lab = state.lab.read().await;
+        let lab = &state.lab;
         match lab.begin_pipeline_run(pipeline_name).await {
             Ok(session_id) => Ok(Self {
                 config: lab.config.clone(),
@@ -46,7 +46,7 @@ impl PipelineExecutionContext {
     ) -> Response {
         let result_value =
             serde_json::to_value(&result).unwrap_or_else(|_| pipeline_result_summary(&result));
-        let lab = state.lab.read().await;
+        let lab = &state.lab;
 
         match lab
             .finish_pipeline_run(&self.session_id, &self.pipeline_name, &result_value)
@@ -121,7 +121,7 @@ pub async fn create_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Response {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     match lab.create_session(&req.name).await {
         Ok(session) => (StatusCode::CREATED, Json(session_response(&session))).into_response(),
         Err(error) => internal_error_response(error),
@@ -129,7 +129,7 @@ pub async fn create_session(
 }
 
 pub async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     let sessions: Vec<_> = lab
         .list_sessions()
         .await
@@ -143,7 +143,7 @@ pub async fn get_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Response {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     match lab.get_session(&session_id).await {
         Some(session) => (StatusCode::OK, Json(session_response(&session))).into_response(),
         None => json_error(StatusCode::NOT_FOUND, "Session not found"),
@@ -154,7 +154,7 @@ pub async fn close_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Response {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     match lab.close_session(&session_id).await {
         Ok(()) => (
             StatusCode::OK,
@@ -166,7 +166,7 @@ pub async fn close_session(
 }
 
 pub async fn list_tools(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     Json(lab.list_tools().await)
 }
 
@@ -174,7 +174,7 @@ pub async fn execute_tool(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ToolRequest>,
 ) -> impl IntoResponse {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     Json(lab.execute_tool(&req.tool_name, req.params, None).await)
 }
 
@@ -189,7 +189,7 @@ pub async fn list_memory(
             .map(|tag| tag.to_string())
             .collect::<Vec<_>>()
     });
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     let keys = lab.list_memory_keys(&session_id, tags.as_deref());
     Json(serde_json::json!({"keys": keys}))
 }
@@ -198,7 +198,7 @@ pub async fn store_memory(
     State(state): State<Arc<AppState>>,
     Json(req): Json<MemoryRequest>,
 ) -> impl IntoResponse {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     let entry = lab.store_memory(&req.session_id, &req.key, &req.value, Some(req.tags.clone()));
     Json(MemoryResponse {
         key: entry.key,
@@ -217,12 +217,12 @@ pub async fn search_memory(
         .get("limit")
         .and_then(|value| value.parse().ok())
         .unwrap_or(10);
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     Json(lab.search_memory(&session_id, &query, None, limit))
 }
 
 pub async fn get_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     Json(lab.get_stats().await)
 }
 
@@ -262,7 +262,7 @@ pub async fn run_workflow(
     State(state): State<Arc<AppState>>,
     Json(req): Json<WorkflowRunRequest>,
 ) -> Response {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     match lab
         .run_workflow_from_template(
             &req.template,
@@ -295,7 +295,7 @@ pub async fn run_agent(
     Json(req): Json<RunAgentRequest>,
 ) -> Response {
     let config = {
-        let lab = state.lab.read().await;
+        let lab = &state.lab;
         lab.config.clone()
     };
     let agent_id = format!(
@@ -333,7 +333,7 @@ pub async fn run_agent(
     };
 
     {
-        let lab = state.lab.read().await;
+        let lab = &state.lab;
         let key = format!("agent_result_{agent_id}");
         lab.store_memory(&req.session_id, &key, &result.data, Some(vec!["agent_result".into()]));
     }
@@ -355,7 +355,7 @@ pub async fn run_agent(
 }
 
 pub async fn ask_llm(State(state): State<Arc<AppState>>, Json(req): Json<AskRequest>) -> Response {
-    let lab = state.lab.read().await;
+    let lab = &state.lab;
     if !lab.has_llm() {
         let hint = if lab.config.provider == "local" {
             "Set LAB_PROVIDER=local and LAB_BASE_URL in .env, or run `lab setup`.".to_string()

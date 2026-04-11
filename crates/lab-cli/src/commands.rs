@@ -315,7 +315,7 @@ pub(crate) async fn cmd_serve(port: u16) -> anyhow::Result<()> {
     let router = lab_api::create_router(state.clone());
     let addr = format!("0.0.0.0:{port}");
     let (provider, model, llm_ready) = {
-        let lab = state.lab.read().await;
+        let lab = &state.lab;
         (
             provider_display_name(&lab.config.provider).to_string(),
             lab.config.model.clone(),
