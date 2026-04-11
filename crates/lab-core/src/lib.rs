@@ -4,6 +4,7 @@
 //! This is the heart of the AI Research Lab, tying together memory,
 //! tools, and permissions into a cohesive agent-driven research system.
 
+pub mod container;
 pub mod config;
 pub mod engine;
 pub mod errors;
@@ -15,6 +16,7 @@ pub mod types;
 pub mod workflows;
 
 // Re-exports for convenience
+pub use container::{LabContainer, LabContainerBuilder};
 pub use config::*;
 pub use engine::ResearchLab;
 pub use errors::{LabError, Result};

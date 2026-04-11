@@ -3,3 +3,7 @@ lab-memory/
 lab-sessions/
 lab-outputs/
 .claw/
+.env
+.graphify_python
+.sandbox-home/
+**/graphify-out/

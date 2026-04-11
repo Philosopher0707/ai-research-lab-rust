@@ -233,13 +233,18 @@ impl ResearcherAgent {
                                 content
                             };
 
+                            let system = "\
+You are a senior software architect analyzing a codebase for the AI Research Lab. \
+Your role is to identify the purpose, design patterns, and key responsibilities of each file. \
+Be concise and technical. Focus on: what the module does, what abstractions it introduces, \
+and how it fits into the larger system. Respond in 2-3 sentences maximum.";
+
                             let prompt = format!(
-                                "Briefly describe this file's purpose and key patterns (max 3 sentences).\n\
-                                 File: {}\n\n{}", fp, truncated
+                                "File: {fp}\n\n{truncated}"
                             );
 
                             match llm
-                                .chat(vec![ChatMessage::user(prompt)], model, 0.1, 256)
+                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.1, 256)
                                 .await
                             {
                                 Ok(resp) => {

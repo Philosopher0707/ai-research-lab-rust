@@ -3,7 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Once;
 
 // ─── Defaults ──────────────────────────────────────────────────────
@@ -66,6 +67,12 @@ fn def_web_timeout() -> u64 {
     30
 }
 
+fn resolve_initial_workspace() -> PathBuf {
+    env_non_empty("LAB_WORKSPACE")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_workspace)
+}
+
 static ENV_INIT: Once = Once::new();
 
 fn env_non_empty(name: &str) -> Option<String> {
@@ -118,6 +125,60 @@ fn provider_default_model(provider: &str) -> &'static str {
 
 fn provider_supports_keyless_access(provider: &str) -> bool {
     provider == "local"
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeProfile {
+    #[default]
+    Development,
+    Production,
+    Test,
+    Benchmark,
+}
+
+impl RuntimeProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Production => "production",
+            Self::Test => "test",
+            Self::Benchmark => "benchmark",
+        }
+    }
+
+    pub fn from_env() -> Option<Self> {
+        env_non_empty("LAB_PROFILE").and_then(|value| value.parse().ok())
+    }
+}
+
+impl FromStr for RuntimeProfile {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "development" | "dev" => Ok(Self::Development),
+            "production" | "prod" => Ok(Self::Production),
+            "test" => Ok(Self::Test),
+            "benchmark" | "bench" => Ok(Self::Benchmark),
+            other => Err(format!("unsupported runtime profile: {other}")),
+        }
+    }
+}
+
+fn load_env_file(path: &Path) {
+    if path.exists() {
+        let _ = dotenvy::from_path_override(path);
+    }
+}
+
+fn load_env_stack(workspace: &Path) {
+    load_env_file(&workspace.join(".env"));
+
+    let profile = env_non_empty("LAB_PROFILE").unwrap_or_else(|| "development".to_string());
+    load_env_file(&workspace.join(format!(".env.{profile}")));
+    load_env_file(&workspace.join(".env.local"));
+    load_env_file(&workspace.join(format!(".env.{profile}.local")));
 }
 
 fn detect_provider_from_env() -> Option<&'static str> {
@@ -296,6 +357,16 @@ impl PipelineConfig {
     pub fn copy(&self) -> Self {
         self.clone()
     }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    pub fn with_stages(mut self, stages: Vec<String>) -> Self {
+        self.stages = stages;
+        self
+    }
 }
 
 // ─── PermissionPolicyConfig ────────────────────────────────────────
@@ -372,6 +443,7 @@ impl Default for PermissionPolicyConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct LabConfigFile {
     workspace: Option<String>,
+    runtime_profile: Option<RuntimeProfile>,
     sessions_dir: Option<String>,
     memory_dir: Option<String>,
     outputs_dir: Option<String>,
@@ -405,6 +477,8 @@ pub struct LabConfig {
     // Workspace paths
     #[serde(default = "default_workspace")]
     pub workspace: PathBuf,
+    #[serde(default)]
+    pub runtime_profile: RuntimeProfile,
     #[serde(default = "def_sessions")]
     pub sessions_dir: PathBuf,
     #[serde(default = "def_memory")]
@@ -484,9 +558,25 @@ pub struct LabConfig {
 impl Default for LabConfig {
     fn default() -> Self {
         Self::initialize_process_env();
+        Self::build_config(
+            resolve_initial_workspace(),
+            RuntimeProfile::from_env().unwrap_or_default(),
+            false,
+            false,
+        )
+    }
+}
 
+impl LabConfig {
+    fn build_config(
+        workspace: PathBuf,
+        runtime_profile: RuntimeProfile,
+        lock_workspace: bool,
+        lock_profile: bool,
+    ) -> Self {
         let mut cfg = Self {
-            workspace: default_workspace(),
+            workspace: workspace.clone(),
+            runtime_profile,
             sessions_dir: def_sessions(),
             memory_dir: def_memory(),
             outputs_dir: def_outputs(),
@@ -517,21 +607,30 @@ impl Default for LabConfig {
             web_rate_limit: def_web_rate(),
             web_timeout_secs: def_web_timeout(),
         };
+
+        cfg.load_layered_files();
         cfg.apply_env_overrides();
+
+        if lock_workspace {
+            cfg.workspace = workspace;
+        }
+        if lock_profile {
+            cfg.runtime_profile = runtime_profile;
+        }
+
         cfg.ensure_directories();
         cfg
     }
-}
 
-impl LabConfig {
     pub fn initialize_process_env() {
         ENV_INIT.call_once(|| {
-            let _ = dotenvy::dotenv_override();
+            let cwd = default_workspace();
+            load_env_stack(&cwd);
 
             if let Some(workspace) = env_non_empty("LAB_WORKSPACE") {
-                let workspace_env = PathBuf::from(workspace).join(".env");
-                if workspace_env.exists() {
-                    let _ = dotenvy::from_path_override(&workspace_env);
+                let workspace = PathBuf::from(workspace);
+                if workspace != cwd {
+                    load_env_stack(&workspace);
                 }
             }
         });
@@ -539,17 +638,34 @@ impl LabConfig {
 
     /// Create config with a specific workspace.
     pub fn with_workspace(path: PathBuf) -> Self {
-        let cfg = Self {
-            workspace: path,
-            ..Self::default()
-        };
-        cfg.ensure_directories();
-        cfg
+        Self::initialize_process_env();
+        Self::build_config(
+            path,
+            RuntimeProfile::from_env().unwrap_or_default(),
+            true,
+            false,
+        )
+    }
+
+    /// Create config with a specific runtime profile.
+    pub fn with_profile(profile: RuntimeProfile) -> Self {
+        Self::initialize_process_env();
+        Self::build_config(resolve_initial_workspace(), profile, false, true)
+    }
+
+    /// Create config with an explicit workspace and runtime profile.
+    pub fn with_workspace_and_profile(path: PathBuf, profile: RuntimeProfile) -> Self {
+        Self::initialize_process_env();
+        Self::build_config(path, profile, true, true)
     }
 
     /// Apply LAB_* environment variable overrides.
     /// Priority: LAB_PROVIDER (explicit) > auto-detect from API key env vars.
     fn apply_env_overrides(&mut self) {
+        if let Some(profile) = RuntimeProfile::from_env() {
+            self.runtime_profile = profile;
+        }
+
         let explicit_provider = env_non_empty("LAB_PROVIDER");
         let explicit_model = env_non_empty("LAB_MODEL");
         let explicit_base_url = env_non_empty("LAB_BASE_URL");
@@ -560,10 +676,20 @@ impl LabConfig {
             self.provider = provider.to_string();
         }
 
-        self.model =
-            explicit_model.unwrap_or_else(|| provider_default_model(&self.provider).to_string());
-        self.base_url = explicit_base_url
-            .unwrap_or_else(|| provider_default_base_url(&self.provider).to_string());
+        // Only apply env / provider defaults when the value hasn't been set by a
+        // config file.  File-loaded values take priority over derived defaults;
+        // explicit env vars (LAB_MODEL / LAB_BASE_URL) always win.
+        if let Some(model) = explicit_model {
+            self.model = model;
+        } else if self.model == def_model() {
+            self.model = provider_default_model(&self.provider).to_string();
+        }
+
+        if let Some(base_url) = explicit_base_url {
+            self.base_url = base_url;
+        } else if self.base_url == def_base_url() {
+            self.base_url = provider_default_base_url(&self.provider).to_string();
+        }
         self.api_key = env_non_empty("LAB_API_KEY")
             .or_else(|| provider_api_env_key(&self.provider).and_then(env_non_empty))
             .unwrap_or_default();
@@ -576,11 +702,41 @@ impl LabConfig {
         }
         if let Ok(v) = std::env::var("LAB_WORKSPACE") {
             self.workspace = PathBuf::from(v);
-            self.ensure_directories();
         }
         if let Ok(v) = std::env::var("LAB_MAX_AGENTS") {
             self.max_agents = v.parse().unwrap_or(self.max_agents);
         }
+    }
+
+    fn load_layered_files(&mut self) {
+        let base_path = self.workspace.join("lab-config.toml");
+        self.load_optional_file(&base_path);
+
+        let profile = self.runtime_profile.as_str().to_string();
+        let profile_path = self.workspace.join(format!("lab-config.{profile}.toml"));
+        self.load_optional_file(&profile_path);
+
+        let local_path = self.workspace.join("lab-config.local.toml");
+        self.load_optional_file(&local_path);
+
+        let profile_local_path = self
+            .workspace
+            .join(format!("lab-config.{profile}.local.toml"));
+        self.load_optional_file(&profile_local_path);
+    }
+
+    fn load_optional_file(&mut self, path: &Path) {
+        if !path.exists() {
+            return;
+        }
+
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(file_cfg) = toml::from_str::<LabConfigFile>(&contents) else {
+            return;
+        };
+        self.apply_from_file(&file_cfg);
     }
 
     pub fn requires_api_key(&self) -> bool {
@@ -658,6 +814,9 @@ impl LabConfig {
     fn apply_from_file(&mut self, file: &LabConfigFile) {
         if let Some(v) = &file.workspace {
             self.workspace = PathBuf::from(v);
+        }
+        if let Some(v) = file.runtime_profile {
+            self.runtime_profile = v;
         }
         if let Some(v) = &file.sessions_dir {
             self.sessions_dir = PathBuf::from(v);
@@ -751,8 +910,62 @@ pub fn create_default_config(workspace: Option<PathBuf>) -> LabConfig {
 mod tests {
     use super::*;
 
+    /// Temporarily blanks a LAB_* env var for the duration of the guard.
+    /// Setting to "" is enough because `env_non_empty` treats empty as unset.
+    struct EnvBlankGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvBlankGuard {
+        fn blank(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, "");
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvBlankGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    /// Mutex that serialises every test touching global env vars.
+    /// Unit tests run in parallel by default; without serialisation the blank
+    /// guards from one test can race with the restore of another.
+    static ENV_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Blank every env var that `apply_env_overrides` or `detect_provider_from_env`
+    /// inspects. Call at the start of any test that asserts on provider/model/base_url
+    /// default values to prevent ambient env state from interfering.
+    fn blank_provider_env() -> Vec<EnvBlankGuard> {
+        [
+            "LAB_PROVIDER",
+            "LAB_MODEL",
+            "LAB_BASE_URL",
+            "LAB_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "ZHIPU_API_KEY",
+            "MINIMAX_API_KEY",
+            "XAI_API_KEY",
+        ]
+        .iter()
+        .map(|k| EnvBlankGuard::blank(k))
+        .collect()
+    }
+
     #[test]
     fn default_config_has_sane_values() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        LabConfig::initialize_process_env();
+        let _guards = blank_provider_env();
         let cfg = LabConfig::default();
         assert_eq!(cfg.max_agents, 20);
         assert_eq!(cfg.max_concurrent_tasks, 10);
@@ -760,6 +973,36 @@ mod tests {
         assert_eq!(cfg.provider, "openrouter");
         assert!(cfg.memory_persistence);
         assert_eq!(cfg.memory_backend, "filesystem");
+    }
+
+    #[test]
+    fn explicit_profile_loads_profile_specific_file() {
+        let _lock = ENV_TEST_MUTEX.lock().unwrap();
+        // Pre-fire ENV_INIT so .env is already loaded before we blank vars.
+        // The constructor's initialize_process_env() will then be a no-op.
+        LabConfig::initialize_process_env();
+        let _guards = blank_provider_env();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp_dir.path().join("lab-config.toml"),
+            "model = 'base-model'\nverbose_logging = false\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.path().join("lab-config.production.toml"),
+            "model = 'prod-model'\nverbose_logging = true\n",
+        )
+        .unwrap();
+
+        let cfg = LabConfig::with_workspace_and_profile(
+            temp_dir.path().to_path_buf(),
+            RuntimeProfile::Production,
+        );
+
+        assert_eq!(cfg.runtime_profile, RuntimeProfile::Production);
+        assert_eq!(cfg.model, "prod-model");
+        assert!(cfg.verbose_logging);
     }
 
     #[test]

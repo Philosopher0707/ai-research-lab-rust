@@ -113,11 +113,17 @@ impl SummarizerAgent {
         if let (Some(llm_client), Some(model)) = (llm, model) {
             let context: String = report.chars().take(3000).collect();
             if !context.is_empty() {
+                let system = "\
+You are the synthesis agent for the AI Research Lab. Your role is to read structured research \
+and review data produced by other agents and distill it into executive-level insights. \
+Output exactly 3–5 bullet-point insights, followed by a 'Recommended Actions' section with \
+3–5 concrete next steps. Be specific and actionable — no vague suggestions. \
+Write in a technical tone suitable for a senior engineering team.";
                 let prompt = format!(
-                    "Based on this research summary, provide 3–5 key insights and recommended action items:\n\n{context}"
+                    "Session data:\n\n{context}"
                 );
                 match llm_client
-                    .chat(vec![ChatMessage::user(prompt)], model, 0.2, 512)
+                    .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.2, 512)
                     .await
                 {
                     Ok(resp) => {

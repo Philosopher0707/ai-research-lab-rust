@@ -62,7 +62,7 @@ fn session_response(session: &LabSession) -> SessionResponse {
     SessionResponse {
         id: session.id.clone(),
         name: session.name.clone(),
-        status: format!("{:?}", session.status).to_lowercase(),
+        status: session.status.as_str().to_string(),
         agents_active: session.agents_active,
         tasks_completed: session.tasks_completed,
     }
@@ -329,6 +329,7 @@ pub async fn run_agent(
         content,
         template,
         profile,
+        dry_run: false,
     };
     let result = match lab_agents::execute_agent(&config, request).await {
         Ok(result) => result,

@@ -4,8 +4,9 @@
 //! Stages: discover → research → analyze → review → code → summarize → report
 
 use lab_agents::collaborator::MultiAgentCollaborator;
-use lab_core::config::LabConfig;
+use lab_core::config::{LabConfig, PipelineConfig};
 use lab_core::llm::LLMClient;
+use lab_core::LabContainerBuilder;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
@@ -98,57 +99,6 @@ impl PipelineResult {
     }
 }
 
-// ─── Pipeline Config ────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct PipelineConfig {
-    pub name: String,
-    pub stages: Vec<String>,
-    pub max_concurrent_stages: usize,
-    pub fail_fast: bool,
-    pub retry_on_failure: bool,
-    pub timeout_per_stage_secs: u64,
-    pub output_path: Option<PathBuf>,
-    pub input_targets: Vec<String>,
-    pub exclude_patterns: Vec<String>,
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            name: "default".into(),
-            stages: vec![
-                "discover".into(),
-                "research".into(),
-                "analyze".into(),
-                "review".into(),
-                "code".into(),
-                "summarize".into(),
-                "report".into(),
-            ],
-            max_concurrent_stages: 1,
-            fail_fast: true,
-            retry_on_failure: false,
-            timeout_per_stage_secs: 1800,
-            output_path: None,
-            input_targets: Vec::new(),
-            exclude_patterns: Vec::new(),
-        }
-    }
-}
-
-impl PipelineConfig {
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = name.into();
-        self
-    }
-
-    pub fn with_stages(mut self, stages: Vec<String>) -> Self {
-        self.stages = stages;
-        self
-    }
-}
-
 fn default_input_targets() -> Vec<String> {
     vec![DEFAULT_INPUT_TARGET.into()]
 }
@@ -228,6 +178,7 @@ impl ExecutionRequest {
             output_path: Some(resolved_output_path),
             input_targets: resolved_targets,
             exclude_patterns: vec![],
+            custom_params: std::collections::HashMap::new(),
         }
     }
 }
@@ -241,24 +192,12 @@ struct PipelineRuntime {
 
 impl PipelineRuntime {
     fn from_config(config: &LabConfig) -> Self {
-        let mut registry = ToolRegistry::new(config.workspace.clone());
-        registry.register_builtins();
-
-        let llm = if config.llm_configured() {
-            Some(lab_core::llm::create_client(
-                &config.provider,
-                &config.api_key,
-                &config.model,
-                &config.base_url,
-            ))
-        } else {
-            None
-        };
+        let container = LabContainerBuilder::new(config.clone()).build();
 
         Self {
-            registry,
-            memory: MemoryWorkspace::new(config.full_path(&config.memory_dir)),
-            llm,
+            registry: container.tool_registry,
+            memory: container.memory,
+            llm: container.llm_client,
             model: config.model.clone(),
         }
     }
@@ -348,6 +287,37 @@ impl ResearchPipeline {
             total_duration,
         );
 
+        // Generate HTML report alongside the markdown report
+        if let Some(html_path) = self.report_html_path() {
+            let ctx = lab_reports::ResearchReportContext {
+                pipeline_name: self.config.name.clone(),
+                session_id: self.session_id.clone(),
+                status: status.clone(),
+                total_duration_secs: total_duration,
+                stages: stage_results
+                    .iter()
+                    .map(|s| lab_reports::StageInput {
+                        name: s.name.clone(),
+                        completed: matches!(s.status, StageStatus::Completed),
+                        duration_secs: s.duration_secs,
+                        error: s.error.clone(),
+                    })
+                    .collect(),
+                discover: memory.get(&self.session_id, &self.stage_key("discover")),
+                researcher_map: memory.get(&self.session_id, "researcher_map"),
+                review_results: memory.get(&self.session_id, "review_results"),
+                ai_summary: None,
+            };
+            let html = lab_reports::render_research_html(&ctx);
+            if let Some(parent) = html_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(&html_path, &html) {
+                Ok(()) => info!("HTML report written to {}", html_path.display()),
+                Err(e) => warn!("Could not write HTML report: {e}"),
+            }
+        }
+
         PipelineResult {
             pipeline_name: self.config.name.clone(),
             status,
@@ -391,17 +361,31 @@ impl ResearchPipeline {
             .map(|path| path.to_string_lossy().to_string())
     }
 
+    fn report_html_path(&self) -> Option<std::path::PathBuf> {
+        self.config
+            .output_path
+            .as_ref()
+            .map(|p| p.with_extension("html"))
+    }
+
+    /// Returns a session-unique memory key scoped to this pipeline and stage.
+    /// Format: `"{pipeline_name}:{stage}"` — prevents key collisions when
+    /// multiple pipelines share the same session.
+    fn stage_key(&self, stage: &str) -> String {
+        format!("{}:{}", self.config.name, stage)
+    }
+
     fn store_pipeline_value(
         &self,
         memory: &mut MemoryWorkspace,
-        key: &str,
+        stage: &str,
         output: &serde_json::Value,
         extra_tags: &[&str],
     ) {
         let mut tags = Vec::with_capacity(extra_tags.len() + 1);
         tags.push("pipeline".to_string());
         tags.extend(extra_tags.iter().map(|tag| (*tag).to_string()));
-        memory.store(&self.session_id, key, output, Some(tags));
+        memory.store(&self.session_id, &self.stage_key(stage), output, Some(tags));
     }
 
     async fn execute_stage_once(
@@ -514,7 +498,7 @@ impl ResearchPipeline {
             }).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>(),
         });
 
-        self.store_pipeline_value(memory, "pipeline_discover", &workspace_stats, &["discover"]);
+        self.store_pipeline_value(memory, "discover", &workspace_stats, &["discover"]);
 
         info!("    Found {} files", all_files.len());
         Ok(workspace_stats)
@@ -553,7 +537,7 @@ impl ResearchPipeline {
 
         memory.store(
             &self.session_id,
-            "pipeline_research",
+            &self.stage_key("research"),
             &output,
             Some(vec!["pipeline".into()]),
         );
@@ -571,7 +555,7 @@ impl ResearchPipeline {
 
         // Read discover data
         let discover = memory
-            .get(&self.session_id, "pipeline_discover")
+            .get(&self.session_id, &self.stage_key("discover"))
             .ok_or("No discover data found")?;
 
         let total_files = discover
@@ -588,7 +572,7 @@ impl ResearchPipeline {
             }
         });
 
-        self.store_pipeline_value(memory, "pipeline_analyze", &analysis, &[]);
+        self.store_pipeline_value(memory, "analyze", &analysis, &[]);
         Ok(analysis)
     }
 
@@ -607,7 +591,7 @@ impl ResearchPipeline {
             "message": "Fast review completed",
         });
 
-        self.store_pipeline_value(memory, "pipeline_review", &review_data, &[]);
+        self.store_pipeline_value(memory, "review", &review_data, &[]);
         Ok(review_data)
     }
 
@@ -627,7 +611,7 @@ impl ResearchPipeline {
             "message": "Code analysis complete",
         });
 
-        self.store_pipeline_value(memory, "pipeline_code", &analysis, &[]);
+        self.store_pipeline_value(memory, "code", &analysis, &[]);
         Ok(analysis)
     }
 
@@ -643,16 +627,11 @@ impl ResearchPipeline {
         // Gather existing data from previous stages (no new LLM calls needed)
         let mut gathered = serde_json::json!({});
 
-        for key in [
-            "pipeline_discover",
-            "pipeline_research",
-            "pipeline_analyze",
-            "pipeline_review",
-            "pipeline_code",
-        ] {
-            if let Some(data) = memory.get(&self.session_id, key) {
+        for stage in ["discover", "research", "analyze", "review", "code"] {
+            let key = self.stage_key(stage);
+            if let Some(data) = memory.get(&self.session_id, &key) {
                 if let Some(obj) = gathered.as_object_mut() {
-                    obj.insert(key.to_string(), data);
+                    obj.insert(key, data);
                 }
             }
         }
@@ -663,7 +642,7 @@ impl ResearchPipeline {
             "summary": gathered,
         });
 
-        self.store_pipeline_value(memory, "pipeline_summarize", &summary, &["report"]);
+        self.store_pipeline_value(memory, "summarize", &summary, &["report"]);
         info!(
             "    Summary generated: {} stages collected",
             gathered.as_object().map(|o| o.len()).unwrap_or(0)
@@ -699,7 +678,7 @@ impl ResearchPipeline {
         md.push_str(&format!("**Stages collected:** {}\n\n", stage_keys.len()));
 
         // Discover summary
-        if let Some(disc) = memory.get(&self.session_id, "pipeline_discover") {
+        if let Some(disc) = memory.get(&self.session_id, &self.stage_key("discover")) {
             md.push_str("## Workspace Discovery\n\n");
             if let Some(n) = disc.get("total_files").and_then(|v| v.as_u64()) {
                 md.push_str(&format!("- **Files found:** {n}\n"));
@@ -780,7 +759,7 @@ impl ResearchPipeline {
             "report_written": written,
         });
 
-        self.store_pipeline_value(memory, "pipeline_report", &report_data, &["report"]);
+        self.store_pipeline_value(memory, "report", &report_data, &["report"]);
         Ok(report_data)
     }
 }
@@ -791,11 +770,13 @@ mod tests {
 
     #[test]
     fn pipeline_config_defaults() {
+        // PipelineConfig is now lab_core::config::PipelineConfig.
+        // Default has empty stages (stages are built by default_stages() at execution time).
         let cfg = PipelineConfig::default();
-        assert_eq!(cfg.stages.len(), 7);
-        assert_eq!(cfg.stages[0], "discover");
+        assert!(cfg.stages.is_empty());
         assert!(cfg.fail_fast);
         assert!(!cfg.retry_on_failure);
+        assert_eq!(cfg.max_concurrent_stages, 5);
     }
 
     #[test]

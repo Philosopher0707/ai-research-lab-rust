@@ -1,31 +1,9 @@
-use lab_api::{create_router, AppState};
 use lab_core::LabConfig;
 use serde_json::{json, Value};
-use std::sync::Arc;
 
-async fn spawn_test_server(
-    state: Arc<AppState>,
-) -> (
-    String,
-    tokio::sync::oneshot::Sender<()>,
-    tokio::task::JoinHandle<()>,
-) {
-    let router = create_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+mod support;
 
-    let server = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-
-    (format!("http://{addr}"), shutdown_tx, server)
-}
+use support::TestServer;
 
 #[tokio::test]
 async fn pipeline_run_endpoint_executes_and_persists_results() {
@@ -43,11 +21,10 @@ async fn pipeline_run_endpoint_executes_and_persists_results() {
     .unwrap();
 
     let config = LabConfig::with_workspace(workspace.path().to_path_buf());
-    let state = Arc::new(AppState::new(config).await);
-    let (base_url, shutdown_tx, server) = spawn_test_server(state.clone()).await;
+    let server = TestServer::start(config).await;
 
     let response = reqwest::Client::new()
-        .post(format!("{base_url}/pipelines/run"))
+        .post(format!("{}/pipelines/run", server.base_url))
         .json(&json!({
             "pipeline_name": "review",
             "targets": ["**/*.rs"],
@@ -74,19 +51,19 @@ async fn pipeline_run_endpoint_executes_and_persists_results() {
         .any(|stage| { stage["name"] == "report" && stage["status"] == "completed" }));
     assert!(workspace.path().join("lab-outputs/test-report.md").exists());
 
-    let lab = state.lab.read().await;
+    let lab = server.state.lab.read().await;
     let session = lab
         .list_sessions()
         .into_iter()
         .find(|session| session.name == "pipeline-review")
         .unwrap();
-    assert_eq!(format!("{:?}", session.status).to_lowercase(), "completed");
+    assert_eq!(session.status.as_str(), "completed");
     assert!(session.tasks_completed >= 5);
 
     let stored = lab.memory().get(&session.id, "pipeline_result").unwrap();
     assert_eq!(stored["status"], "completed");
     assert_eq!(stored["output_path"], "lab-outputs/test-report.md");
 
-    let _ = shutdown_tx.send(());
-    let _ = server.await;
+    drop(lab);
+    server.shutdown().await;
 }

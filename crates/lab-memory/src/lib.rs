@@ -323,6 +323,42 @@ impl MemoryWorkspace {
         store_count + self.global_store.len()
     }
 
+    /// List all session IDs that have stored entries.
+    pub fn sessions(&self) -> Vec<String> {
+        self.stores.keys().cloned().collect()
+    }
+
+    /// List all (non-expired) keys stored under a given session.
+    pub fn keys_for_session(&self, session_id: &str) -> Vec<String> {
+        self.stores
+            .get(session_id)
+            .map(|store| {
+                store
+                    .iter()
+                    .filter(|(_, e)| !e.is_expired())
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// List all (non-expired) entries for a session as (key, value, tags) tuples.
+    pub fn entries_for_session(
+        &self,
+        session_id: &str,
+    ) -> Vec<(&str, &serde_json::Value, &[String])> {
+        self.stores
+            .get(session_id)
+            .map(|store| {
+                store
+                    .values()
+                    .filter(|e| !e.is_expired())
+                    .map(|e| (e.key.as_str(), &e.value, e.tags.as_slice()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Clear memory entries.
     pub fn clear(&mut self, session_id: Option<&str>, scope: MemoryScope) {
         match scope {

@@ -40,16 +40,21 @@ pub fn resolve_restriction(raw: &str) -> RestrictionLevel {
 /// Category a tool belongs to
 pub fn tool_category(tool_name: &str) -> &'static str {
     match tool_name {
-        "read_file" | "glob_search" | "grep_search" => "read",
+        "read_file" | "file_info" | "list_directory" | "glob_search" | "grep_search" => "read",
         "write_file" | "edit_file" => "write",
         "bash" => "system",
-        "web_search" | "web_fetch" => "network",
+        "git_status" => "vcs",
+        "web_search" | "web_fetch" | "tavily_search" | "fetch_url" => "network",
         _ => "custom",
     }
 }
 
 pub const SAFE_TOOLS: &[&str] = &[
-    "read_file", "glob_search", "grep_search", "LSP", "ToolSearch",
+    "read_file",
+    "glob_search",
+    "grep_search",
+    "LSP",
+    "ToolSearch",
 ];
 
 // ─── Policy ─────────────────────────────────────────────
@@ -139,9 +144,15 @@ impl PermissionEngine {
             }
             RestrictionLevel::ReadOnly => {
                 if category == "read" {
-                    (true, format!("Read-only mode: '{tool_name}' is a read tool"))
+                    (
+                        true,
+                        format!("Read-only mode: '{tool_name}' is a read tool"),
+                    )
                 } else {
-                    (false, format!("Read-only mode: '{tool_name}' is not a read tool"))
+                    (
+                        false,
+                        format!("Read-only mode: '{tool_name}' is not a read tool"),
+                    )
                 }
             }
             RestrictionLevel::SafeTools => {
@@ -150,18 +161,27 @@ impl PermissionEngine {
                 } else if category == "write" {
                     if let Some(allowed) = self.policy.allowed_tools.get("write") {
                         if allowed.iter().any(|t| t == tool_name) {
-                            return self.record(agent_id, tool_name, true,
-                                "Explicitly allowed in safe mode", start);
+                            return self.record(
+                                agent_id,
+                                tool_name,
+                                true,
+                                "Explicitly allowed in safe mode",
+                                start,
+                            );
                         }
                     }
-                    (false, format!("Safe tools mode: write tool '{tool_name}' not explicitly allowed"))
+                    (
+                        false,
+                        format!("Safe tools mode: write tool '{tool_name}' not explicitly allowed"),
+                    )
                 } else {
-                    (false, format!("Safe tools mode: {category} tool '{tool_name}' denied"))
+                    (
+                        false,
+                        format!("Safe tools mode: {category} tool '{tool_name}' denied"),
+                    )
                 }
             }
-            RestrictionLevel::FullAccess => {
-                (true, "Full access mode".to_string())
-            }
+            RestrictionLevel::FullAccess => (true, "Full access mode".to_string()),
         };
 
         self.record(agent_id, tool_name, result.0, &result.1, start)
@@ -193,7 +213,10 @@ impl PermissionEngine {
 
         let mut map = HashMap::new();
         map.insert("allowed".to_string(), serde_json::Value::Bool(allowed));
-        map.insert("reason".to_string(), serde_json::Value::String(reason.to_string()));
+        map.insert(
+            "reason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
         map
     }
 

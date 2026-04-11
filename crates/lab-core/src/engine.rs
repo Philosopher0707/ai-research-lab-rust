@@ -2,6 +2,7 @@
 //! Mirrors core/lab/engine.py (460 lines) with full Python parity.
 
 use crate::config::LabConfig;
+use crate::container::{LabContainer, LabContainerBuilder};
 use crate::errors::{LabError, Result};
 use crate::events::EventBus;
 use crate::events::LabEvent;
@@ -12,7 +13,7 @@ use crate::workflows::{
     register_builtin_templates, TemplateRegistry, Workflow, WorkflowEngine, WorkflowExecution,
 };
 use lab_memory::MemoryWorkspace;
-use lab_permissions::{PermissionEngine, PermissionPolicy};
+use lab_permissions::PermissionEngine;
 use lab_tools::ToolRegistry;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -49,32 +50,19 @@ pub struct ResearchLab {
 impl ResearchLab {
     /// Create a new lab with the given configuration.
     pub fn new(config: LabConfig) -> Self {
-        let memory_dir = config.full_path(&config.memory_dir);
-        let memory = MemoryWorkspace::new(memory_dir.clone());
+        Self::from_container(LabContainerBuilder::new(config).build())
+    }
 
-        let ws = config.workspace.clone();
-        let mut tool_registry = ToolRegistry::new(ws.clone());
-        tool_registry.register_builtins();
-
-        let policy = PermissionPolicy::default();
-        let permission_engine = PermissionEngine::new(policy);
-
-        let sessions_dir = config.full_path(&config.sessions_dir);
-        let session_store = SessionStore::new(sessions_dir);
-
-        let event_bus = EventBus::new(1000);
-
-        // Create LLM client if configured
-        let llm_client = if config.llm_configured() && !config.provider.is_empty() {
-            Some(crate::llm::create_client(
-                &config.provider,
-                &config.api_key,
-                &config.model,
-                &config.base_url,
-            ))
-        } else {
-            None
-        };
+    pub fn from_container(container: LabContainer) -> Self {
+        let LabContainer {
+            config,
+            memory,
+            tool_registry,
+            permission_engine,
+            session_store,
+            event_bus,
+            llm_client,
+        } = container;
 
         let mut lab = Self {
             config,
@@ -715,6 +703,26 @@ mod tests {
         let config = LabConfig::with_workspace(temp_dir.path().to_path_buf());
         let lab = ResearchLab::new(config);
         assert_eq!(lab.has_llm(), lab.config.llm_configured());
+    }
+
+    #[tokio::test]
+    async fn lab_can_start_from_injected_container() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let workspace = temp_dir.path().to_path_buf();
+        let config = LabConfig::with_workspace(workspace.clone());
+        let custom_memory = MemoryWorkspace::new(workspace.join("custom-memory"));
+        let mut custom_tools = ToolRegistry::new(workspace.clone());
+        custom_tools.register_builtins();
+
+        let container = LabContainerBuilder::new(config)
+            .with_memory(custom_memory)
+            .with_tool_registry(custom_tools)
+            .build();
+        let mut lab = ResearchLab::from_container(container);
+        lab.start().await.unwrap();
+
+        assert!(lab.tools().get("git_status").is_some());
+        lab.shutdown().await.unwrap();
     }
 
     #[tokio::test]

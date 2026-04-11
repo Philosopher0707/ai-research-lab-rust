@@ -240,11 +240,18 @@ impl ReviewerAgent {
                         } else {
                             content
                         };
+                        let system = "\
+You are a rigorous code reviewer for the AI Research Lab — a Rust/Python multi-agent workspace. \
+Your job is to identify concrete, actionable quality issues in the code. \
+Focus on: error handling (unwrap/panic risks), API surface design, performance anti-patterns, \
+missing documentation, and security concerns. \
+Format your response as a numbered list. Be specific — cite line patterns or function names. \
+Do not praise the code; only report issues and improvements.";
                         let prompt = format!(
-                            "Code review for `{fp}`. List 3–5 concrete quality issues or improvements:\n\n{snippet}"
+                            "File: `{fp}`\n\n```\n{snippet}\n```"
                         );
                         match llm
-                            .chat(vec![ChatMessage::user(prompt)], model, 0.1, 512)
+                            .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.1, 512)
                             .await
                         {
                             Ok(resp) => insights.push(serde_json::json!({

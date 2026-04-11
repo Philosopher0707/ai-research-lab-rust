@@ -27,3 +27,4 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 futures.workspace = true
 uuid.workspace = true
+atty.workspace = true

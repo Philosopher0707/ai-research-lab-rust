@@ -24,6 +24,17 @@ pub(crate) fn print_rule() {
     println!("{}", "─".repeat(72).bright_black());
 }
 
+/// Return a colored category label for tool listings.
+pub(crate) fn category_color(category: &str) -> colored::ColoredString {
+    match category {
+        "filesystem" => format!("  [{category}]").yellow().bold(),
+        "network" => format!("  [{category}]").cyan().bold(),
+        "system" => format!("  [{category}]").red().bold(),
+        "vcs" => format!("  [{category}]").bright_blue().bold(),
+        _ => format!("  [{category}]").bright_black().bold(),
+    }
+}
+
 fn print_ascii_banner() {
     for line in [
         "    __    ___    ____ ",
@@ -55,38 +66,30 @@ pub(crate) fn llm_setup_hint(config: &LabConfig) -> String {
 
 pub(crate) fn print_help_menu() {
     println!();
-    println!("{}", "Commands".bold().bright_white());
+    println!("{}", "Chat commands".bold().bright_white());
     print_rule();
-    println!(
-        "  {} {}",
-        "/help".cyan().bold(),
-        "Show available commands".dimmed()
-    );
-    println!(
-        "  {} {}",
-        "/status".cyan().bold(),
-        "Show workspace and provider status".dimmed()
-    );
-    println!(
-        "  {} {}",
-        "/pipeline".cyan().bold(),
-        "Run the default research pipeline".dimmed()
-    );
-    println!(
-        "  {} {}",
-        "/clear".cyan().bold(),
-        "Clear only the current chat history".dimmed()
-    );
-    println!(
-        "  {} {}",
-        "/exit".cyan().bold(),
-        "Leave the interactive session".dimmed()
-    );
-    println!(
-        "  {} {}",
-        "[question]".cyan().bold(),
-        "Ask about architecture, Rust, debugging, or workflows".dimmed()
-    );
+
+    let cmds: &[(&str, &str)] = &[
+        ("/help",          "Show this menu"),
+        ("/status",        "Workspace and provider status"),
+        ("/tools",         "List all registered tools by category"),
+        ("/memory",        "Inspect the memory store"),
+        ("/search <q>",    "Web search via DuckDuckGo"),
+        ("/fetch <url>",   "Fetch a URL and print its content"),
+        ("/pipeline",      "Run the default research pipeline"),
+        ("/report",        "Open the latest HTML report in browser"),
+        ("/clear",         "Clear current chat history"),
+        ("/exit",          "Leave the session"),
+        ("[question]",     "Ask anything about the project or Rust"),
+    ];
+
+    for (cmd, desc) in cmds {
+        println!(
+            "  {}  {}",
+            format!("{cmd:<22}").cyan().bold(),
+            desc.dimmed()
+        );
+    }
     println!();
 }
 
@@ -126,7 +129,7 @@ pub(crate) fn print_chat_header(config: &LabConfig, llm_ready: bool) {
     println!(
         "  {} {}",
         "Slash".bright_black(),
-        "/help  /status  /pipeline  /clear  /exit".cyan()
+        "/help  /tools  /search <q>  /fetch <url>  /memory  /pipeline  /report  /clear  /exit".cyan()
     );
     println!(
         "  {} {}",
@@ -152,6 +155,14 @@ pub(crate) async fn with_spinner<F, T>(label: &str, future: F) -> T
 where
     F: Future<Output = T>,
 {
+    // Skip spinner when not connected to a terminal or when disabled explicitly
+    let is_tty = atty::is(atty::Stream::Stdout);
+    let disabled = std::env::var("NO_SPINNER").is_ok();
+
+    if !is_tty || disabled {
+        return future.await;
+    }
+
     let done = Arc::new(AtomicBool::new(false));
     let done_signal = Arc::clone(&done);
     let label = label.to_string();

@@ -88,10 +88,15 @@ impl LlmResearcherAgent {
                             } else {
                                 content
                             };
-                            let prompt = format!("Analyze this file and describe its purpose and key patterns. File: {fp}\n\n{truncated}");
+                            let system = "\
+You are a senior software architect analyzing a Rust/Python multi-agent codebase called \
+AI Research Lab. For each file, identify: (1) its primary responsibility, (2) the key types \
+or functions it exposes, (3) how it relates to other modules (dependencies, what depends on it). \
+Be precise and technical. Avoid filler phrases like 'This file contains' — just state the facts.";
+                            let prompt = format!("File: {fp}\n\n{truncated}");
                             match self
                                 .client
-                                .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 1024)
+                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 1024)
                                 .await
                             {
                                 Ok(response) => {
@@ -194,10 +199,19 @@ impl LlmReviewerAgent {
                             .and_then(|d| d.get("content"))
                             .and_then(|c| c.as_str())
                         {
-                            let prompt = format!("Review this code for quality and best practices. File: {fp}\n\n{content}");
+                            let system = "\
+You are a strict code reviewer for the AI Research Lab — a Rust/Python multi-agent workspace. \
+Review the provided file for: unsafe unwrap/expect calls, missing error propagation, \
+API design issues, performance problems (unnecessary clones, blocking in async context), \
+missing documentation, and correctness bugs. \
+Structure your response as: \
+'## Issues' (numbered list with file:line references where possible) and \
+'## Suggestions' (numbered list of improvements). \
+Be terse and direct — engineering quality review, not a tutorial.";
+                            let prompt = format!("File: {fp}\n\n```\n{content}\n```");
                             match self
                                 .client
-                                .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 2048)
                                 .await
                             {
                                 Ok(response) => {
@@ -293,10 +307,19 @@ impl LlmSummarizerAgent {
             return result; // No data to synthesize
         }
 
-        let prompt = format!("Synthesize these findings into a concise executive summary (max 500 words).\n\n{context}");
+        let system = "\
+You are the executive synthesis agent for the AI Research Lab. You receive structured JSON \
+data from researcher and reviewer agents and produce a concise technical summary for the \
+engineering team. Your output must have exactly these sections: \
+'## Codebase Overview' (2-3 sentences), \
+'## Key Findings' (5 bullet points max), \
+'## Risk Areas' (issues that need immediate attention), \
+'## Recommended Actions' (prioritized, numbered list). \
+Write in a direct, technical tone. Max 500 words total.";
+        let prompt = format!("Agent findings:\n\n{context}");
         match self
             .client
-            .chat(vec![ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+            .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 2048)
             .await
         {
             Ok(response) => {

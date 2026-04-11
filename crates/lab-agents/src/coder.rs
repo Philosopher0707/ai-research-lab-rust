@@ -2,6 +2,7 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
+use lab_core::llm::ChatMessage;
 use lab_core::types::AgentResult;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -55,6 +56,63 @@ impl CoderAgent {
 
         let mut results = HashMap::new();
         let mut written_files = Vec::new();
+
+        // LLM-powered code generation: if path + task given but no content, ask LLM to generate
+        if let (Some(p), None, Some(llm_client), Some(mdl)) = (path, content, _llm, _model) {
+            let system = "\
+You are a senior Rust/Python engineer working inside the AI Research Lab — a multi-agent \
+research workspace built in Rust. When asked to generate code, produce clean, idiomatic code \
+that matches the project style: Rust uses anyhow for errors, serde for serialization, tokio \
+for async, and tracing for logging. Python uses type annotations, docstrings, and logging. \
+Output ONLY the raw file content — no markdown fences, no explanations, no commentary. \
+The output will be written directly to a file.";
+            let prompt = format!("Generate the file `{p}` for this task: {task}");
+            match llm_client
+                .chat(
+                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                    mdl,
+                    0.2,
+                    2048,
+                )
+                .await
+            {
+                Ok(resp) => {
+                    let generated = resp.content.trim().to_string();
+                    let write_result = registry
+                        .execute(
+                            "write_file",
+                            &HashMap::from([
+                                ("path".into(), serde_json::json!(p)),
+                                ("content".into(), serde_json::json!(&generated)),
+                            ]),
+                        )
+                        .await;
+
+                    if write_result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let bytes = write_result
+                            .get("data")
+                            .and_then(|d| d.get("bytes_written"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        written_files
+                            .push(serde_json::json!({"path": p, "bytes": bytes, "method": "llm"}));
+                    } else {
+                        self.impl_.cleanup().await;
+                        return AgentResult::fail(
+                            format!("Failed to write LLM-generated file {p}"),
+                            Some(write_result),
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("CoderAgent LLM generation failed: {e}");
+                }
+            }
+        }
 
         if let Some(p) = path {
             let text = content.unwrap_or("");
