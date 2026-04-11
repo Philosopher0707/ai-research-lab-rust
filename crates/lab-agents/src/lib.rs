@@ -15,6 +15,7 @@ pub mod base;
 pub mod coder;
 pub mod collaborator;
 pub mod communication;
+pub mod improvement;
 pub mod improvement_planner;
 pub mod llm_agents;
 pub mod researcher;

@@ -1,12 +1,21 @@
 //! AutonomousImprovementPipeline — full self-improvement loop.
 //!
-//! Stages:
-//!   1. Research  — ResearcherAgent + ReviewerAgent analyze the workspace
-//!   2. Plan      — ImprovementPlanner turns findings into concrete candidates
-//!   3. Implement — SelfEditAgent applies each candidate, cargo check verifies
-//!   4. (Optional) cargo test per change
-//!   5. Git commit each successful change on a dedicated branch
+//! Two paths, selected by `ImprovementConfig::use_clippy`:
+//!
+//! **Clippy path (default, industry-grade):**
+//!   1. Research  — ResearcherAgent scans the workspace
+//!   2. Analyse   — `cargo clippy --message-format json` → `Vec<ClippyFinding>`
+//!   3. Classify  — `risk::classify()` → `RiskLevel` per finding
+//!   4. Apply     — `edit_strategy::dispatch()` (AutoFix / Patch / LLMEdit)
+//!   5. Verify    — `VerificationChain`: rustfmt → clippy Δ → cargo check → test
+//!   6. Commit    — `git add -- <file> && git commit`
+//!
+//! **LLM path (fallback, use_clippy = false):**
+//!   1. Research → Review (regex) → Plan (LLM) → SelfEditAgent → cargo check → commit
 
+use crate::improvement::{
+    classify, dispatch, run_clippy, ClippyFinding, RiskLevel, VerificationChain,
+};
 use crate::improvement_planner::{plan_improvements, ImprovementCandidate};
 use crate::researcher::ResearcherAgent;
 use crate::reviewer::ReviewerAgent;
@@ -26,9 +35,9 @@ use tracing::{info, warn};
 pub struct ImprovementConfig {
     /// Glob pattern for files to analyse
     pub pattern: String,
-    /// How many candidates to ask the planner for
+    /// How many candidates to ask the planner for (LLM path only)
     pub max_candidates: usize,
-    /// How many to actually attempt per run
+    /// How many findings/candidates to actually attempt per run
     pub max_per_run: usize,
     /// If true: plan and show candidates but do not apply
     pub dry_run: bool,
@@ -36,8 +45,11 @@ pub struct ImprovementConfig {
     pub run_tests: bool,
     /// Create a dedicated git branch for this improvement session
     pub create_branch: bool,
-    /// Fetch web context before planning
+    /// Fetch web context before planning (LLM path only)
     pub web_research: bool,
+    /// Use `cargo clippy --message-format json` as the finding source (recommended).
+    /// Set to false to fall back to the regex-based ReviewerAgent + LLM planner.
+    pub use_clippy: bool,
 }
 
 impl Default for ImprovementConfig {
@@ -50,6 +62,7 @@ impl Default for ImprovementConfig {
             run_tests: false,
             create_branch: true,
             web_research: false,
+            use_clippy: true,
         }
     }
 }
@@ -77,7 +90,7 @@ pub struct ImprovementReport {
     pub git_branch: Option<String>,
     pub duration_secs: f64,
     pub attempts: Vec<ImprovementAttempt>,
-    /// Planned candidates that were not attempted (past max_per_run)
+    /// Findings/candidates not attempted this run (past max_per_run)
     pub remaining: Vec<ImprovementCandidate>,
 }
 
@@ -108,18 +121,222 @@ impl AutonomousImprovementPipeline {
     ) -> ImprovementReport {
         let start = Instant::now();
 
-        // ── 1. Research ──────────────────────────────────────
+        // Research phase is common to both paths
         info!("[improve] Phase 1: research");
         self.run_researcher(registry, memory, llm, model).await;
 
-        // ── 2. Review ────────────────────────────────────────
-        info!("[improve] Phase 2: review");
+        if self.config.use_clippy {
+            self.run_clippy_pipeline(registry, memory, llm, model, start).await
+        } else {
+            self.run_llm_pipeline(registry, memory, llm, model, start).await
+        }
+    }
+
+    // ─── Clippy path ─────────────────────────────────────────────
+
+    async fn run_clippy_pipeline(
+        &mut self,
+        registry: &mut ToolRegistry,
+        memory: &mut MemoryWorkspace,
+        llm: &dyn LLMClient,
+        model: &str,
+        start: Instant,
+    ) -> ImprovementReport {
+        // ── 2. Run clippy ─────────────────────────────────────────
+        info!("[improve] Phase 2: cargo clippy analysis");
+        let all_findings = run_clippy(&self.workspace).await;
+        info!("[improve] clippy found {} findings", all_findings.len());
+
+        // ── 3. Classify and filter ────────────────────────────────
+        let mut classified: Vec<(ClippyFinding, RiskLevel)> = all_findings
+            .into_iter()
+            .map(|f| {
+                let r = classify(&f);
+                (f, r)
+            })
+            .filter(|(_, r)| *r != RiskLevel::HumanReview)
+            .collect();
+
+        // Sort: AutoFix first (safest), then Patch, then LLMEdit
+        classified.sort_by_key(|(_, r)| *r);
+
+        let total_planned = classified.len();
+
+        if classified.is_empty() {
+            info!("[improve] No actionable clippy findings — workspace is clean");
+            return ImprovementReport {
+                session_id: self.session_id.clone(),
+                total_planned: 0,
+                applied: 0,
+                failed: 0,
+                skipped: 0,
+                git_branch: None,
+                duration_secs: start.elapsed().as_secs_f64(),
+                attempts: Vec::new(),
+                remaining: Vec::new(),
+            };
+        }
+
+        // ── 4. Split active/remaining ─────────────────────────────
+        let (active, rest) = if classified.len() > self.config.max_per_run {
+            let rest = classified.split_off(self.config.max_per_run);
+            (classified, rest)
+        } else {
+            (classified, Vec::new())
+        };
+
+        let remaining: Vec<ImprovementCandidate> = rest
+            .into_iter()
+            .map(|(f, r)| finding_to_candidate(&f, r))
+            .collect();
+
+        // ── Dry run early exit ────────────────────────────────────
+        if self.config.dry_run {
+            let attempts = active
+                .iter()
+                .map(|(f, r)| ImprovementAttempt {
+                    file: f.file.to_string_lossy().into_owned(),
+                    task: f.message.clone(),
+                    priority: risk_to_priority(*r),
+                    edits_applied: 0,
+                    success: false,
+                    reverted: false,
+                    error: Some("dry_run".into()),
+                })
+                .collect();
+            return ImprovementReport {
+                session_id: self.session_id.clone(),
+                total_planned,
+                applied: 0,
+                failed: 0,
+                skipped: active.len(),
+                git_branch: None,
+                duration_secs: start.elapsed().as_secs_f64(),
+                attempts,
+                remaining,
+            };
+        }
+
+        // ── 5. Snapshot baseline warning count ───────────────────
+        let baseline = VerificationChain::snapshot_baseline(&self.workspace).await;
+        info!("[improve] baseline: {baseline} clippy warnings");
+
+        // ── 6. Create git branch ──────────────────────────────────
+        let git_branch = if self.config.create_branch {
+            info!("[improve] Creating git branch");
+            Some(self.create_git_branch(registry).await)
+        } else {
+            None
+        };
+
+        // ── 7. Apply findings one by one ──────────────────────────
+        info!(
+            "[improve] Phase 3: applying {} finding(s)",
+            active.len()
+        );
+        let mut attempts: Vec<ImprovementAttempt> = Vec::new();
+        let mut applied = 0usize;
+        let mut failed = 0usize;
+
+        let chain = VerificationChain::new(
+            self.workspace.clone(),
+            self.config.run_tests,
+            baseline,
+        );
+
+        for (finding, risk) in &active {
+            let file_str = finding.file.to_string_lossy().into_owned();
+            info!("[improve] [{risk}] {file_str}:{} — {}", finding.line_start, &finding.message[..finding.message.len().min(72)]);
+
+            // Apply the edit
+            let edit_result = dispatch(finding, *risk, &self.workspace, llm, model).await;
+
+            if !edit_result.success {
+                failed += 1;
+                attempts.push(ImprovementAttempt {
+                    file: file_str,
+                    task: finding.message.clone(),
+                    priority: risk_to_priority(*risk),
+                    edits_applied: 0,
+                    success: false,
+                    reverted: false,
+                    error: Some(edit_result.detail),
+                });
+                continue;
+            }
+
+            // Verify the edit
+            let verify = chain.run(&finding.file).await;
+            if !verify.passed {
+                warn!("[improve] Verification failed — reverting {file_str}");
+                self.revert_file(registry, &file_str).await;
+                failed += 1;
+                attempts.push(ImprovementAttempt {
+                    file: file_str,
+                    task: finding.message.clone(),
+                    priority: risk_to_priority(*risk),
+                    edits_applied: 1,
+                    success: false,
+                    reverted: true,
+                    error: Some(verify.details.join("; ")),
+                });
+                continue;
+            }
+
+            // Commit
+            if git_branch.is_some() {
+                self.commit_change(registry, &file_str, &finding.message).await;
+            }
+
+            applied += 1;
+            attempts.push(ImprovementAttempt {
+                file: file_str,
+                task: finding.message.clone(),
+                priority: risk_to_priority(*risk),
+                edits_applied: 1,
+                success: true,
+                reverted: false,
+                error: None,
+            });
+        }
+
+        // Store summary in memory
+        let summary = serde_json::json!({
+            "total_planned": total_planned,
+            "applied": applied,
+            "failed": failed,
+        });
+        let _ = memory.store(&self.session_id, "clippy_improvement_result", &summary, None);
+
+        ImprovementReport {
+            session_id: self.session_id.clone(),
+            total_planned,
+            applied,
+            failed,
+            skipped: remaining.len(),
+            git_branch,
+            duration_secs: start.elapsed().as_secs_f64(),
+            attempts,
+            remaining,
+        }
+    }
+
+    // ─── LLM path (fallback) ─────────────────────────────────────
+
+    async fn run_llm_pipeline(
+        &mut self,
+        registry: &mut ToolRegistry,
+        memory: &mut MemoryWorkspace,
+        llm: &dyn LLMClient,
+        model: &str,
+        start: Instant,
+    ) -> ImprovementReport {
+        info!("[improve] Phase 2: review (regex)");
         self.run_reviewer(registry, memory, llm, model).await;
 
         let researcher_data = memory.get(&self.session_id, "researcher_map");
         let review_data = memory.get(&self.session_id, "review_results");
 
-        // ── 3. Optional web research ─────────────────────────
         let web_ctx = if self.config.web_research {
             info!("[improve] Phase 3: web research");
             self.fetch_web_context(registry, &review_data).await
@@ -127,7 +344,6 @@ impl AutonomousImprovementPipeline {
             None
         };
 
-        // ── 4. Plan ──────────────────────────────────────────
         info!("[improve] Phase 4: planning");
         let all_candidates = plan_improvements(
             researcher_data.as_ref(),
@@ -156,7 +372,6 @@ impl AutonomousImprovementPipeline {
             };
         }
 
-        // Split into active batch + remaining
         let (active, remaining) = if all_candidates.len() > self.config.max_per_run {
             let rest = all_candidates[self.config.max_per_run..].to_vec();
             (all_candidates.into_iter().take(self.config.max_per_run).collect::<Vec<_>>(), rest)
@@ -164,7 +379,6 @@ impl AutonomousImprovementPipeline {
             (all_candidates, Vec::new())
         };
 
-        // ── Dry run early exit ────────────────────────────────
         if self.config.dry_run {
             let attempts = active
                 .iter()
@@ -191,28 +405,49 @@ impl AutonomousImprovementPipeline {
             };
         }
 
-        // ── 5. Create git branch ──────────────────────────────
         let git_branch = if self.config.create_branch {
-            info!("[improve] Creating git branch");
             Some(self.create_git_branch(registry).await)
         } else {
             None
         };
 
-        // ── 6. Apply improvements ─────────────────────────────
-        info!("[improve] Phase 5: applying {} candidate(s)", active.len());
+        // Group by file to prevent sequential edits stomping each other
+        let mut file_order: Vec<String> = Vec::new();
+        let mut file_groups: HashMap<String, Vec<&ImprovementCandidate>> = HashMap::new();
+        for c in &active {
+            if !file_groups.contains_key(&c.file) {
+                file_order.push(c.file.clone());
+            }
+            file_groups.entry(c.file.clone()).or_default().push(c);
+        }
+        let file_groups: Vec<(String, Vec<&ImprovementCandidate>)> = file_order
+            .into_iter()
+            .map(|f| {
+                let cs = file_groups.remove(&f).unwrap_or_default();
+                (f, cs)
+            })
+            .collect();
+
+        info!(
+            "[improve] Phase 5: applying {} candidate(s) across {} file(s)",
+            active.len(),
+            file_groups.len()
+        );
         let mut attempts: Vec<ImprovementAttempt> = Vec::new();
         let mut applied = 0usize;
         let mut failed = 0usize;
 
-        for (idx, candidate) in active.iter().enumerate() {
-            info!(
-                "[improve] [{}/{}] {} — {}",
-                idx + 1,
-                active.len(),
-                candidate.file,
-                &candidate.task[..candidate.task.len().min(60)]
-            );
+        for (file, candidates) in &file_groups {
+            let combined_task = if candidates.len() == 1 {
+                candidates[0].task.clone()
+            } else {
+                candidates
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("{}. {}", i + 1, c.task))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
 
             let agent_id = format!(
                 "self-edit-{}",
@@ -224,17 +459,8 @@ impl AutonomousImprovementPipeline {
                 AgentProfile::default(),
                 self.workspace.clone(),
             );
-
             let result = agent
-                .execute(
-                    registry,
-                    memory,
-                    &candidate.file,
-                    &candidate.task,
-                    false,
-                    llm,
-                    model,
-                )
+                .execute(registry, memory, file.as_str(), &combined_task, false, llm, model)
                 .await;
 
             if result.success {
@@ -245,66 +471,71 @@ impl AutonomousImprovementPipeline {
                     .unwrap_or(0) as usize;
 
                 if edits == 0 {
-                    // LLM proposed no changes — skip without counting as failure
-                    attempts.push(ImprovementAttempt {
-                        file: candidate.file.clone(),
-                        task: candidate.task.clone(),
-                        priority: candidate.priority.clone(),
-                        edits_applied: 0,
-                        success: false,
-                        reverted: false,
-                        error: Some("no edits proposed".into()),
-                    });
+                    for c in candidates {
+                        attempts.push(ImprovementAttempt {
+                            file: c.file.clone(),
+                            task: c.task.clone(),
+                            priority: c.priority.clone(),
+                            edits_applied: 0,
+                            success: false,
+                            reverted: false,
+                            error: Some("no edits proposed".into()),
+                        });
+                    }
                     continue;
                 }
 
-                // Optional: run cargo test
                 let mut ok = true;
                 if self.config.run_tests {
                     ok = self.run_tests(registry).await;
                     if !ok {
-                        // Revert
-                        self.revert_file(registry, &candidate.file).await;
-                        failed += 1;
-                        attempts.push(ImprovementAttempt {
-                            file: candidate.file.clone(),
-                            task: candidate.task.clone(),
-                            priority: candidate.priority.clone(),
-                            edits_applied: edits,
-                            success: false,
-                            reverted: true,
-                            error: Some("cargo test failed — reverted".into()),
-                        });
+                        self.revert_file(registry, file.as_str()).await;
+                        failed += candidates.len();
+                        for c in candidates {
+                            attempts.push(ImprovementAttempt {
+                                file: c.file.clone(),
+                                task: c.task.clone(),
+                                priority: c.priority.clone(),
+                                edits_applied: edits,
+                                success: false,
+                                reverted: true,
+                                error: Some("cargo test failed — reverted".into()),
+                            });
+                        }
                         continue;
                     }
                 }
 
-                // Commit the change
                 if ok && git_branch.is_some() {
-                    self.commit_change(registry, &candidate.file, &candidate.task).await;
+                    self.commit_change(registry, file.as_str(), &combined_task).await;
                 }
 
-                applied += 1;
-                attempts.push(ImprovementAttempt {
-                    file: candidate.file.clone(),
-                    task: candidate.task.clone(),
-                    priority: candidate.priority.clone(),
-                    edits_applied: edits,
-                    success: true,
-                    reverted: false,
-                    error: None,
-                });
+                applied += candidates.len();
+                let edits_each = (edits / candidates.len().max(1)).max(1);
+                for c in candidates {
+                    attempts.push(ImprovementAttempt {
+                        file: c.file.clone(),
+                        task: c.task.clone(),
+                        priority: c.priority.clone(),
+                        edits_applied: edits_each,
+                        success: true,
+                        reverted: false,
+                        error: None,
+                    });
+                }
             } else {
-                failed += 1;
-                attempts.push(ImprovementAttempt {
-                    file: candidate.file.clone(),
-                    task: candidate.task.clone(),
-                    priority: candidate.priority.clone(),
-                    edits_applied: 0,
-                    success: false,
-                    reverted: true,
-                    error: result.error,
-                });
+                failed += candidates.len();
+                for c in candidates {
+                    attempts.push(ImprovementAttempt {
+                        file: c.file.clone(),
+                        task: c.task.clone(),
+                        priority: c.priority.clone(),
+                        edits_applied: 0,
+                        success: false,
+                        reverted: true,
+                        error: result.error.clone(),
+                    });
+                }
             }
         }
 
@@ -321,7 +552,7 @@ impl AutonomousImprovementPipeline {
         }
     }
 
-    // ─── Phase helpers ───────────────────────────────────────────
+    // ─── Shared phase helpers ─────────────────────────────────────
 
     async fn run_researcher(
         &self,
@@ -388,7 +619,6 @@ impl AutonomousImprovementPipeline {
         registry: &mut ToolRegistry,
         review_data: &Option<serde_json::Value>,
     ) -> Option<String> {
-        // Build a query from the top issue rule
         let top_rule = review_data
             .as_ref()
             .and_then(|rv| rv.get("summary"))
@@ -422,7 +652,8 @@ impl AutonomousImprovementPipeline {
                         .take(3)
                         .filter_map(|item| {
                             let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                            let snippet = item.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
+                            let snippet =
+                                item.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
                             if snippet.is_empty() {
                                 None
                             } else {
@@ -438,12 +669,11 @@ impl AutonomousImprovementPipeline {
         }
     }
 
-    // ─── Git helpers ─────────────────────────────────────────────
+    // ─── Git helpers ──────────────────────────────────────────────
 
     async fn create_git_branch(&self, registry: &mut ToolRegistry) -> String {
         let branch = format!("lab/improve-{}", &self.session_id[..8]);
         let ws = shell_escape(self.workspace.to_string_lossy().as_ref());
-        // Create branch; if it already exists just switch to it
         let cmd = format!(
             "git -C {ws} checkout -b {branch} 2>/dev/null || git -C {ws} checkout {branch} 2>&1"
         );
@@ -476,8 +706,9 @@ impl AutonomousImprovementPipeline {
             "lab: {file_name}: {}",
             task.chars().take(72).collect::<String>()
         );
+        let fp = shell_escape(file);
         let cmd = format!(
-            "git -C {ws} add -A && git -C {ws} commit -m {}",
+            "git -C {ws} add -- {fp} && git -C {ws} commit -m {}",
             shell_escape(&msg)
         );
         registry
@@ -502,9 +733,7 @@ impl AutonomousImprovementPipeline {
 
     async fn run_tests(&self, registry: &mut ToolRegistry) -> bool {
         let ws = shell_escape(self.workspace.to_string_lossy().as_ref());
-        let cmd = format!(
-            "cd {ws} && cargo test --quiet 2>&1 | tail -20"
-        );
+        let cmd = format!("cd {ws} && cargo test --quiet 2>&1 | tail -20");
         let r = registry
             .execute(
                 "bash",
@@ -519,7 +748,25 @@ impl AutonomousImprovementPipeline {
     }
 }
 
-// ─── Shell Escaping ───────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────
+
+fn risk_to_priority(risk: RiskLevel) -> String {
+    match risk {
+        RiskLevel::AutoFix => "high".into(),
+        RiskLevel::Patch => "medium".into(),
+        RiskLevel::LLMEdit => "low".into(),
+        RiskLevel::HumanReview => "low".into(),
+    }
+}
+
+fn finding_to_candidate(finding: &ClippyFinding, risk: RiskLevel) -> ImprovementCandidate {
+    ImprovementCandidate {
+        file: finding.file.to_string_lossy().into_owned(),
+        task: finding.message.clone(),
+        priority: risk_to_priority(risk),
+        rationale: finding.lint.clone(),
+    }
+}
 
 fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))

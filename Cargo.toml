@@ -55,3 +55,4 @@ axum = { version = "0.8", features = ["ws"] }
 tokio-tungstenite = "0.26"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+diffy = "0.4"

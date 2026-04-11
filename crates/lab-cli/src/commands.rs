@@ -1076,6 +1076,7 @@ pub(crate) async fn cmd_improve(
         run_tests,
         create_branch,
         web_research,
+        use_clippy: true,
     };
 
     let mut pipeline = AutonomousImprovementPipeline::new(
@@ -1166,7 +1167,7 @@ pub(crate) async fn cmd_improve(
                     .collect::<String>();
                 (
                     "✗".red().bold().to_string(),
-                    format!("{reason}").yellow().to_string(),
+                    reason.yellow().to_string(),
                 )
             };
             println!(
