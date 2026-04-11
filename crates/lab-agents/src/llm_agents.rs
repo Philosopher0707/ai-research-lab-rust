@@ -84,7 +84,8 @@ impl LlmResearcherAgent {
                             .and_then(|c| c.as_str())
                         {
                             let truncated = if content.len() > 4000 {
-                                &content[..4000]
+                                let end = content.floor_char_boundary(4000);
+                                &content[..end]
                             } else {
                                 content
                             };

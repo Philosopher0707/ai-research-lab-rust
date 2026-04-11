@@ -393,7 +393,8 @@ or function names. Do not praise the code; only report issues and improvements."
             };
 
             let snippet = if content.len() > 2500 {
-                &content[..2500]
+                let end = content.floor_char_boundary(2500);
+                &content[..end]
             } else {
                 content
             };

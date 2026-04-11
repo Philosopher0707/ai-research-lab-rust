@@ -3,6 +3,7 @@ mod setup;
 mod ui;
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use lab_core::LabConfig;
 
 #[derive(Parser)]
@@ -135,7 +136,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
     LabConfig::initialize_process_env();
 
     // Initialise tracing — info level by default, debug if LAB_DEBUG=1
@@ -152,6 +153,16 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    if let Err(e) = dispatch(cli).await {
+        let msg = format!("{e:#}");
+        if !msg.is_empty() {
+            eprintln!("{} {}", "●".red().bold(), msg);
+        }
+        std::process::exit(1);
+    }
+}
+
+async fn dispatch(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         None => commands::cmd_chat().await,
         Some(Commands::Init { workspace }) => commands::cmd_init(&workspace),

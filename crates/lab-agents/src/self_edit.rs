@@ -102,9 +102,10 @@ impl SelfEditAgent {
 
         // Truncate very large files to stay within LLM context
         let snippet = if content.len() > 8000 {
+            let end = content.floor_char_boundary(8000);
             format!(
                 "{}\n\n// [truncated — {} total lines]",
-                &content[..8000],
+                &content[..end],
                 total_lines
             )
         } else {
