@@ -70,17 +70,17 @@ pub(crate) fn print_help_menu() {
     print_rule();
 
     let cmds: &[(&str, &str)] = &[
-        ("/help",          "Show this menu"),
-        ("/status",        "Workspace and provider status"),
-        ("/tools",         "List all registered tools by category"),
-        ("/memory",        "Inspect the memory store"),
-        ("/search <q>",    "Web search via DuckDuckGo"),
-        ("/fetch <url>",   "Fetch a URL and print its content"),
-        ("/pipeline",      "Run the default research pipeline"),
-        ("/report",        "Open the latest HTML report in browser"),
-        ("/clear",         "Clear current chat history"),
-        ("/exit",          "Leave the session"),
-        ("[question]",     "Ask anything about the project or Rust"),
+        ("/help", "Show this menu"),
+        ("/status", "Workspace and provider status"),
+        ("/tools", "List all registered tools by category"),
+        ("/memory", "Inspect the memory store"),
+        ("/search <q>", "Web search via DuckDuckGo"),
+        ("/fetch <url>", "Fetch a URL and print its content"),
+        ("/pipeline", "Run the default research pipeline"),
+        ("/report", "Open the latest HTML report in browser"),
+        ("/clear", "Clear current chat history"),
+        ("/exit", "Leave the session"),
+        ("[question]", "Ask anything about the project or Rust"),
     ];
 
     for (cmd, desc) in cmds {
@@ -129,7 +129,8 @@ pub(crate) fn print_chat_header(config: &LabConfig, llm_ready: bool) {
     println!(
         "  {} {}",
         "Slash".bright_black(),
-        "/help  /tools  /search <q>  /fetch <url>  /memory  /pipeline  /report  /clear  /exit".cyan()
+        "/help  /tools  /search <q>  /fetch <url>  /memory  /pipeline  /report  /clear  /exit"
+            .cyan()
     );
     println!(
         "  {} {}",

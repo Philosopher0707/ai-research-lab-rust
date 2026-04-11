@@ -113,7 +113,9 @@ impl AgentFactoryRegistry {
     }
 
     pub fn get(&self, agent_type: &str) -> Option<&dyn AgentFactory> {
-        self.factories.get(agent_type).map(|factory| factory.as_ref())
+        self.factories
+            .get(agent_type)
+            .map(|factory| factory.as_ref())
     }
 
     pub fn supported_types(&self) -> Vec<String> {
@@ -324,7 +326,9 @@ impl AgentFactory for SelfEditFactory {
 }
 
 pub fn supported_agent_types() -> String {
-    AgentFactoryRegistry::with_builtins().supported_types().join(" | ")
+    AgentFactoryRegistry::with_builtins()
+        .supported_types()
+        .join(" | ")
 }
 
 pub async fn execute_agent_with_context(

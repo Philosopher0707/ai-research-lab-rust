@@ -103,7 +103,11 @@ pub struct AutonomousImprovementPipeline {
 }
 
 impl AutonomousImprovementPipeline {
-    pub fn new(session_id: impl Into<String>, workspace: PathBuf, config: ImprovementConfig) -> Self {
+    pub fn new(
+        session_id: impl Into<String>,
+        workspace: PathBuf,
+        config: ImprovementConfig,
+    ) -> Self {
         Self {
             session_id: session_id.into(),
             workspace,
@@ -126,9 +130,11 @@ impl AutonomousImprovementPipeline {
         self.run_researcher(registry, memory, llm, model).await;
 
         if self.config.use_clippy {
-            self.run_clippy_pipeline(registry, memory, llm, model, start).await
+            self.run_clippy_pipeline(registry, memory, llm, model, start)
+                .await
         } else {
-            self.run_llm_pipeline(registry, memory, llm, model, start).await
+            self.run_llm_pipeline(registry, memory, llm, model, start)
+                .await
         }
     }
 
@@ -230,23 +236,20 @@ impl AutonomousImprovementPipeline {
         };
 
         // ── 7. Apply findings one by one ──────────────────────────
-        info!(
-            "[improve] Phase 3: applying {} finding(s)",
-            active.len()
-        );
+        info!("[improve] Phase 3: applying {} finding(s)", active.len());
         let mut attempts: Vec<ImprovementAttempt> = Vec::new();
         let mut applied = 0usize;
         let mut failed = 0usize;
 
-        let chain = VerificationChain::new(
-            self.workspace.clone(),
-            self.config.run_tests,
-            baseline,
-        );
+        let chain = VerificationChain::new(self.workspace.clone(), self.config.run_tests, baseline);
 
         for (finding, risk) in &active {
             let file_str = finding.file.to_string_lossy().into_owned();
-            info!("[improve] [{risk}] {file_str}:{} — {}", finding.line_start, &finding.message[..finding.message.len().min(72)]);
+            info!(
+                "[improve] [{risk}] {file_str}:{} — {}",
+                finding.line_start,
+                &finding.message[..finding.message.len().min(72)]
+            );
 
             // Apply the edit
             let edit_result = dispatch(finding, *risk, &self.workspace, llm, model).await;
@@ -285,7 +288,8 @@ impl AutonomousImprovementPipeline {
 
             // Commit
             if git_branch.is_some() {
-                self.commit_change(registry, &file_str, &finding.message).await;
+                self.commit_change(registry, &file_str, &finding.message)
+                    .await;
             }
 
             applied += 1;
@@ -306,7 +310,12 @@ impl AutonomousImprovementPipeline {
             "applied": applied,
             "failed": failed,
         });
-        let _ = memory.store(&self.session_id, "clippy_improvement_result", &summary, None);
+        let _ = memory.store(
+            &self.session_id,
+            "clippy_improvement_result",
+            &summary,
+            None,
+        );
 
         ImprovementReport {
             session_id: self.session_id.clone(),
@@ -374,7 +383,13 @@ impl AutonomousImprovementPipeline {
 
         let (active, remaining) = if all_candidates.len() > self.config.max_per_run {
             let rest = all_candidates[self.config.max_per_run..].to_vec();
-            (all_candidates.into_iter().take(self.config.max_per_run).collect::<Vec<_>>(), rest)
+            (
+                all_candidates
+                    .into_iter()
+                    .take(self.config.max_per_run)
+                    .collect::<Vec<_>>(),
+                rest,
+            )
         } else {
             (all_candidates, Vec::new())
         };
@@ -449,10 +464,7 @@ impl AutonomousImprovementPipeline {
                     .join("\n")
             };
 
-            let agent_id = format!(
-                "self-edit-{}",
-                &uuid::Uuid::new_v4().to_string()[..6]
-            );
+            let agent_id = format!("self-edit-{}", &uuid::Uuid::new_v4().to_string()[..6]);
             let mut agent = SelfEditAgent::new(
                 agent_id,
                 self.session_id.clone(),
@@ -460,7 +472,15 @@ impl AutonomousImprovementPipeline {
                 self.workspace.clone(),
             );
             let result = agent
-                .execute(registry, memory, file.as_str(), &combined_task, false, llm, model)
+                .execute(
+                    registry,
+                    memory,
+                    file.as_str(),
+                    &combined_task,
+                    false,
+                    llm,
+                    model,
+                )
                 .await;
 
             if result.success {
@@ -507,7 +527,8 @@ impl AutonomousImprovementPipeline {
                 }
 
                 if ok && git_branch.is_some() {
-                    self.commit_change(registry, file.as_str(), &combined_task).await;
+                    self.commit_change(registry, file.as_str(), &combined_task)
+                        .await;
                 }
 
                 applied += candidates.len();
@@ -642,7 +663,11 @@ impl AutonomousImprovementPipeline {
             )
             .await;
 
-        if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             let snippets: Vec<String> = result
                 .get("data")
                 .and_then(|d| d.get("results"))

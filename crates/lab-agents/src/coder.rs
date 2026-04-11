@@ -39,6 +39,7 @@ impl CoderAgent {
     }
 
     /// Execute: create or write a file. Supports direct content or template generation.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,

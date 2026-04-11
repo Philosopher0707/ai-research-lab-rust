@@ -80,9 +80,11 @@ async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
         .await
         .unwrap();
     assert!(tool_exec["success"].as_bool().unwrap_or(false));
-    assert!(tool_exec["data"]["entries"].as_array().unwrap().iter().any(|entry| {
-        entry["name"].as_str() == Some("lib.rs")
-    }));
+    assert!(tool_exec["data"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| { entry["name"].as_str() == Some("lib.rs") }));
 
     client
         .post(format!("{}/memory", server.base_url))
@@ -121,9 +123,11 @@ async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
         .json()
         .await
         .unwrap();
-    assert!(search_results.as_array().unwrap().iter().any(|entry| {
-        entry["key"].as_str() == Some("notes")
-    }));
+    assert!(search_results
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| { entry["key"].as_str() == Some("notes") }));
 
     let agent_response: Value = client
         .post(format!("{}/agents/run", server.base_url))

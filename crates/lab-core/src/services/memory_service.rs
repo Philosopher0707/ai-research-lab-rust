@@ -14,7 +14,9 @@ pub struct MemoryService {
 
 impl MemoryService {
     pub fn new(workspace: MemoryWorkspace) -> Self {
-        Self { workspace: RwLock::new(workspace) }
+        Self {
+            workspace: RwLock::new(workspace),
+        }
     }
 
     pub fn store(
@@ -24,18 +26,17 @@ impl MemoryService {
         value: &serde_json::Value,
         tags: Option<Vec<String>>,
     ) -> MemoryEntry {
-        self.workspace.write().unwrap().store(session_id, key, value, tags)
+        self.workspace
+            .write()
+            .unwrap()
+            .store(session_id, key, value, tags)
     }
 
     pub fn get(&self, session_id: &str, key: &str) -> Option<serde_json::Value> {
         self.workspace.read().unwrap().get(session_id, key)
     }
 
-    pub fn list_keys(
-        &self,
-        session_id: &str,
-        tags: Option<&[String]>,
-    ) -> Vec<String> {
+    pub fn list_keys(&self, session_id: &str, tags: Option<&[String]>) -> Vec<String> {
         self.workspace.read().unwrap().list_keys(session_id, tags)
     }
 
@@ -46,7 +47,10 @@ impl MemoryService {
         tags: Option<&[String]>,
         limit: usize,
     ) -> Vec<serde_json::Value> {
-        self.workspace.read().unwrap().search(session_id, query, tags, limit)
+        self.workspace
+            .read()
+            .unwrap()
+            .search(session_id, query, tags, limit)
     }
 
     pub fn entry_count(&self) -> usize {

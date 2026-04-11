@@ -44,10 +44,7 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn category(&self) -> &str;
-    async fn execute(
-        &self,
-        params: &HashMap<String, serde_json::Value>,
-    ) -> ToolResult;
+    async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult;
 }
 
 pub trait ToolPlugin: Send + Sync {
@@ -547,10 +544,8 @@ impl Tool for GrepTool {
             .unwrap_or(0) as usize;
 
         // Optional glob filter (e.g. "*.rs", "**/*.toml")
-        let file_glob: Option<globset::GlobSet> = params
-            .get("glob")
-            .and_then(|v| v.as_str())
-            .and_then(|g| {
+        let file_glob: Option<globset::GlobSet> =
+            params.get("glob").and_then(|v| v.as_str()).and_then(|g| {
                 let mut b = GlobSetBuilder::new();
                 b.add(Glob::new(g).ok()?);
                 b.build().ok()
@@ -934,9 +929,7 @@ fn parse_ddg_html_results(html: &str, max: usize) -> Vec<serde_json::Value> {
     let anchor_re = ANCHOR_RE.get_or_init(|| {
         regex::Regex::new(r#"(?si)(<a[^>]*\bclass="result__a"[^>]*>)(.*?)</a>"#).unwrap()
     });
-    let href_re = HREF_RE.get_or_init(|| {
-        regex::Regex::new(r#"(?i)\bhref="([^"]+)""#).unwrap()
-    });
+    let href_re = HREF_RE.get_or_init(|| regex::Regex::new(r#"(?i)\bhref="([^"]+)""#).unwrap());
     let snippet_re = SNIPPET_RE.get_or_init(|| {
         regex::Regex::new(r#"(?si)\bclass="result__snippet"[^>]*>(.*?)</a>"#).unwrap()
     });
@@ -1166,7 +1159,11 @@ impl Tool for DuckDuckGoTool {
         // Fetch the DDG lite HTML page and scrape real search results.
         let (results, source) = if results.is_empty() && answer.is_null() {
             let fallback = ddg_html_fallback(&client, &query, max_results).await;
-            let src = if fallback.is_empty() { "duckduckgo" } else { "duckduckgo-html" };
+            let src = if fallback.is_empty() {
+                "duckduckgo"
+            } else {
+                "duckduckgo-html"
+            };
             (fallback, src)
         } else {
             (results, "duckduckgo")
@@ -1208,12 +1205,7 @@ impl Tool for TavilyTool {
         };
         let api_key = match std::env::var("TAVILY_API_KEY") {
             Ok(key) if !key.is_empty() => key,
-            _ => {
-                return ToolResult::err(
-                    "TAVILY_API_KEY environment variable is not set",
-                    start,
-                )
-            }
+            _ => return ToolResult::err("TAVILY_API_KEY environment variable is not set", start),
         };
         let max_results = params
             .get("max_results")
@@ -1458,10 +1450,7 @@ impl ToolRegistry {
         let plugin_name = plugin.name().to_string();
         let plugin_version = plugin.version().to_string();
         for tool in plugin.tools(&self.config_workspace) {
-            self.register_with_source(
-                tool,
-                format!("{plugin_name}@{plugin_version}"),
-            );
+            self.register_with_source(tool, format!("{plugin_name}@{plugin_version}"));
         }
         self.plugins.push(PluginRegistration {
             name: plugin_name,
@@ -1590,13 +1579,13 @@ mod tests {
         let mut registry = ToolRegistry::new(workspace.path().to_path_buf());
         registry.register_builtins();
 
-        let result = registry
-            .execute("list_directory", &HashMap::new())
-            .await;
+        let result = registry.execute("list_directory", &HashMap::new()).await;
 
         assert!(result["success"].as_bool().unwrap_or(false));
-        assert!(result["data"]["entries"].as_array().unwrap().iter().any(|entry| {
-            entry["name"].as_str() == Some("demo.txt")
-        }));
+        assert!(result["data"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| { entry["name"].as_str() == Some("demo.txt") }));
     }
 }

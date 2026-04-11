@@ -13,7 +13,10 @@ pub struct LlmService {
 
 impl LlmService {
     pub fn new(client: Option<Box<dyn LLMClient>>, model: impl Into<String>) -> Self {
-        Self { client, model: model.into() }
+        Self {
+            client,
+            model: model.into(),
+        }
     }
 
     pub fn has_client(&self) -> bool {
@@ -36,9 +39,11 @@ impl LlmService {
         max_tokens: u32,
     ) -> Option<String> {
         let client = self.client.as_ref()?;
-        let messages =
-            vec![ChatMessage::system(system), ChatMessage::user(prompt)];
-        match client.chat(messages, &self.model, temperature, max_tokens).await {
+        let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
+        match client
+            .chat(messages, &self.model, temperature, max_tokens)
+            .await
+        {
             Ok(resp) => Some(resp.content),
             Err(e) => {
                 warn!("LLM call failed: {}", e);
@@ -54,7 +59,10 @@ impl LlmService {
         max_tokens: u32,
     ) -> Option<String> {
         let client = self.client.as_ref()?;
-        match client.chat(messages, &self.model, temperature, max_tokens).await {
+        match client
+            .chat(messages, &self.model, temperature, max_tokens)
+            .await
+        {
             Ok(resp) => Some(resp.content),
             Err(e) => {
                 warn!("LLM chat failed: {}", e);

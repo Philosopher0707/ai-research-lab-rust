@@ -45,11 +45,18 @@ impl ReviewerAgent {
         }
     }
 
-    pub fn id(&self) -> &str { self.impl_.id() }
-    pub fn session_id(&self) -> &str { self.impl_.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.impl_.state() }
+    pub fn id(&self) -> &str {
+        self.impl_.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.impl_.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.impl_.state()
+    }
 
     /// Execute: review files for code quality issues.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,
@@ -127,7 +134,8 @@ impl ReviewerAgent {
             })
         };
 
-        self.impl_.write_memory(memory, "review_results", &data, None);
+        self.impl_
+            .write_memory(memory, "review_results", &data, None);
         self.impl_.cleanup().await;
         AgentResult::ok(data)
     }
@@ -145,7 +153,10 @@ impl ReviewerAgent {
         // Group findings by file
         let mut by_file: HashMap<PathBuf, Vec<&ClippyFinding>> = HashMap::new();
         for finding in &findings {
-            by_file.entry(finding.file.clone()).or_default().push(finding);
+            by_file
+                .entry(finding.file.clone())
+                .or_default()
+                .push(finding);
         }
 
         // Extract a simple substring hint from the pattern (e.g. "src/" from "src/**/*.rs")
@@ -154,7 +165,11 @@ impl ReviewerAgent {
         let pattern_hint: Option<String> = pattern.and_then(|p| {
             // If the pattern contains a directory prefix before **, use it as a filter.
             let before_star = p.split('*').next().unwrap_or("").trim_end_matches('/');
-            if before_star.is_empty() { None } else { Some(before_star.to_lowercase()) }
+            if before_star.is_empty() {
+                None
+            } else {
+                Some(before_star.to_lowercase())
+            }
         });
 
         let limit = file_limit.unwrap_or(50).min(200);
@@ -178,12 +193,14 @@ impl ReviewerAgent {
             .map(|(file, file_findings)| {
                 let issues: Vec<serde_json::Value> = file_findings
                     .iter()
-                    .map(|f| serde_json::json!({
-                        "rule": f.lint,
-                        "line": f.line_start,
-                        "msg":  f.message,
-                        "applicability": format!("{:?}", f.applicability),
-                    }))
+                    .map(|f| {
+                        serde_json::json!({
+                            "rule": f.lint,
+                            "line": f.line_start,
+                            "msg":  f.message,
+                            "applicability": format!("{:?}", f.applicability),
+                        })
+                    })
                     .collect();
                 let count = issues.len();
                 serde_json::json!({
@@ -223,7 +240,11 @@ impl ReviewerAgent {
             )
             .await;
 
-        if !files_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if !files_result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             return Vec::new();
         }
 
@@ -231,7 +252,11 @@ impl ReviewerAgent {
             .get("data")
             .and_then(|d| d.get("matches"))
             .and_then(|m| m.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         if let Some(p) = path {
@@ -252,7 +277,11 @@ impl ReviewerAgent {
                 )
                 .await;
 
-            if !content_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !content_result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
 
@@ -266,10 +295,7 @@ impl ReviewerAgent {
             let mut issues = Vec::new();
 
             let has_docstring = lines.iter().take(10).any(|l| {
-                l.contains("\"\"\"")
-                    || l.contains("'''")
-                    || l.contains("//!")
-                    || l.contains("///")
+                l.contains("\"\"\"") || l.contains("'''") || l.contains("//!") || l.contains("///")
             });
             if !has_docstring {
                 issues.push(serde_json::json!({ "rule": "missing_docstring", "line": 1,
@@ -305,8 +331,10 @@ impl ReviewerAgent {
                 let upper = line.to_uppercase();
                 for tag in &["TODO", "FIXME", "HACK"] {
                     if upper.contains(*tag) {
-                        issues.push(serde_json::json!({ "rule": format!("pending_{}", tag.to_lowercase()),
-                            "line": i + 1, "msg": format!("{} comment found", tag) }));
+                        issues.push(
+                            serde_json::json!({ "rule": format!("pending_{}", tag.to_lowercase()),
+                            "line": i + 1, "msg": format!("{} comment found", tag) }),
+                        );
                     }
                 }
             }
@@ -342,7 +370,9 @@ or function names. Do not praise the code; only report issues and improvements."
 
         let mut insights = Vec::new();
         for review in reviews.iter().take(2) {
-            let Some(fp) = review.get("path").and_then(|v| v.as_str()) else { continue };
+            let Some(fp) = review.get("path").and_then(|v| v.as_str()) else {
+                continue;
+            };
 
             let cr = registry
                 .execute(
@@ -362,14 +392,25 @@ or function names. Do not praise the code; only report issues and improvements."
                 continue;
             };
 
-            let snippet = if content.len() > 2500 { &content[..2500] } else { content };
+            let snippet = if content.len() > 2500 {
+                &content[..2500]
+            } else {
+                content
+            };
             let prompt = format!("File: `{fp}`\n\n```\n{snippet}\n```");
 
             match llm
-                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.1, 512)
+                .chat(
+                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                    model,
+                    0.1,
+                    512,
+                )
                 .await
             {
-                Ok(resp) => insights.push(serde_json::json!({ "path": fp, "review": resp.content })),
+                Ok(resp) => {
+                    insights.push(serde_json::json!({ "path": fp, "review": resp.content }))
+                }
                 Err(e) => tracing::warn!("LLM review for {}: {}", fp, e),
             }
         }

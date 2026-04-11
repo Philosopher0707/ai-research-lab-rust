@@ -50,13 +50,22 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".into(), content: content.into() }
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -142,10 +151,8 @@ impl LLMClient for OpenAICompatibleClient {
                         .map_err(|e| LLMError::MalformedResponse(e.to_string()))?;
 
                     if status < 400 {
-                        let choice = body
-                            .get("choices")
-                            .and_then(|c| c.get(0))
-                            .ok_or_else(|| {
+                        let choice =
+                            body.get("choices").and_then(|c| c.get(0)).ok_or_else(|| {
                                 LLMError::MalformedResponse(format!(
                                     "no choices in response: {}",
                                     body
@@ -317,7 +324,10 @@ impl LLMClient for AnthropicClient {
                 .and_then(|m| m.as_str())
                 .unwrap_or("unknown error")
                 .to_string();
-            return Err(LLMError::ApiError { status, message: err_msg });
+            return Err(LLMError::ApiError {
+                status,
+                message: err_msg,
+            });
         }
 
         let mut content = String::new();

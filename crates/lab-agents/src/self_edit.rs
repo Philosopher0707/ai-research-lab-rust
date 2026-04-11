@@ -22,12 +22,7 @@ pub struct SelfEditAgent {
 }
 
 impl SelfEditAgent {
-    pub fn new(
-        id: String,
-        session_id: String,
-        profile: AgentProfile,
-        workspace: PathBuf,
-    ) -> Self {
+    pub fn new(id: String, session_id: String, profile: AgentProfile, workspace: PathBuf) -> Self {
         Self {
             impl_: AgentImpl::new(
                 id.clone(),
@@ -55,6 +50,7 @@ impl SelfEditAgent {
     /// - `file_path` — path to the file (relative to workspace or absolute)
     /// - `task`      — natural-language description of the improvement
     /// - `dry_run`   — if true, parse and return proposed edits without applying them
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,
@@ -232,9 +228,7 @@ Rules:\n\
 
         // ── 5. Verify with cargo check ────────────────────────────
         let ws = shell_escape(self.workspace.to_string_lossy().as_ref());
-        let check_cmd = format!(
-            "cd {ws} && cargo check --message-format short 2>&1 | head -60"
-        );
+        let check_cmd = format!("cd {ws} && cargo check --message-format short 2>&1 | head -60");
 
         let check_result = registry
             .execute(
@@ -312,8 +306,7 @@ fn parse_edits(text: &str) -> Vec<serde_json::Value> {
         Some(i) => start + i,
         None => return Vec::new(),
     };
-    serde_json::from_str::<Vec<serde_json::Value>>(text[start..end].trim())
-        .unwrap_or_default()
+    serde_json::from_str::<Vec<serde_json::Value>>(text[start..end].trim()).unwrap_or_default()
 }
 
 // ─── Shell Escaping ───────────────────────────────────────────────

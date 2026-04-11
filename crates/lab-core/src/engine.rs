@@ -9,8 +9,8 @@ use crate::container::{LabContainer, LabContainerBuilder};
 use crate::errors::{LabError, Result};
 use crate::events::EventBus;
 use crate::events::LabEvent;
-use crate::llm::LLMClient;
 use crate::llm::ChatMessage;
+use crate::llm::LLMClient;
 use crate::runtime::LabRuntime;
 use crate::types::*;
 use crate::workflows::{
@@ -71,19 +71,21 @@ impl ResearchLab {
         agent_id: &str,
         agent_meta: serde_json::Value,
     ) {
-        self.runtime.sessions.register_agent(session_id, agent_id, agent_meta).await;
+        self.runtime
+            .sessions
+            .register_agent(session_id, agent_id, agent_meta)
+            .await;
         self.runtime.counts.lock().unwrap().agent_spawns += 1;
     }
 
     pub async fn remove_agent(&self, session_id: &str, agent_id: &str) -> bool {
-        self.runtime.sessions.remove_agent(session_id, agent_id).await
+        self.runtime
+            .sessions
+            .remove_agent(session_id, agent_id)
+            .await
     }
 
-    pub async fn get_agent(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Option<serde_json::Value> {
+    pub async fn get_agent(&self, session_id: &str, agent_id: &str) -> Option<serde_json::Value> {
         self.runtime.sessions.get_agent(session_id, agent_id).await
     }
 
@@ -104,7 +106,10 @@ impl ResearchLab {
 
     /// Check if a tool exists.  Convenience wrapper over `with_tools`.
     pub async fn tool_exists(&self, name: &str) -> bool {
-        self.runtime.tools.with_registry(|r| r.get(name).is_some()).await
+        self.runtime
+            .tools
+            .with_registry(|r| r.get(name).is_some())
+            .await
     }
 
     /// List tools as JSON metadata.
@@ -120,14 +125,27 @@ impl ResearchLab {
         params: &HashMap<String, serde_json::Value>,
     ) -> serde_json::Value {
         // Increment and drop the lock *before* the async permission check.
-        { self.runtime.counts.lock().unwrap().permission_checks += 1; }
+        {
+            self.runtime.counts.lock().unwrap().permission_checks += 1;
+        }
 
-        let result = self.runtime.tools.check_permission(agent_id, tool_name, params).await;
-        let allowed = result.get("allowed").and_then(|v| v.as_bool()).unwrap_or(false);
+        let result = self
+            .runtime
+            .tools
+            .check_permission(agent_id, tool_name, params)
+            .await;
+        let allowed = result
+            .get("allowed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         {
             let mut counts = self.runtime.counts.lock().unwrap();
-            if allowed { counts.permission_approved += 1; } else { counts.permission_denied += 1; }
+            if allowed {
+                counts.permission_approved += 1;
+            } else {
+                counts.permission_denied += 1;
+            }
         }
 
         serde_json::to_value(result).unwrap_or_default()
@@ -141,18 +159,27 @@ impl ResearchLab {
         agent_id: Option<&str>,
     ) -> serde_json::Value {
         self.runtime.counts.lock().unwrap().tool_calls += 1;
-        self.runtime.tools.execute(tool_name, params, agent_id).await
+        self.runtime
+            .tools
+            .execute(tool_name, params, agent_id)
+            .await
     }
 
     // ─── Pipeline Management ────────────────────────────────────
 
     pub fn register_pipeline(&self, name: &str, config: serde_json::Value) {
-        self.runtime.pipeline_configs.write().unwrap().insert(name.to_string(), config);
+        self.runtime
+            .pipeline_configs
+            .write()
+            .unwrap()
+            .insert(name.to_string(), config);
     }
 
     pub async fn begin_pipeline_run(&self, pipeline_name: &str) -> Result<String> {
         self.runtime.counts.lock().unwrap().pipeline_runs += 1;
-        let session = self.create_session(&format!("pipeline-{}", pipeline_name)).await?;
+        let session = self
+            .create_session(&format!("pipeline-{}", pipeline_name))
+            .await?;
         let session_id = session.id.clone();
 
         self.runtime.event_bus.emit(LabEvent::new(
@@ -179,7 +206,10 @@ impl ResearchLab {
                     .count()
             })
             .unwrap_or(0);
-        self.runtime.sessions.set_tasks_completed(session_id, steps).await;
+        self.runtime
+            .sessions
+            .set_tasks_completed(session_id, steps)
+            .await;
 
         self.runtime.memory.store(
             session_id,
@@ -207,7 +237,13 @@ impl ResearchLab {
         pipeline_name: &str,
         _targets: Vec<String>,
     ) -> Result<serde_json::Value> {
-        if !self.runtime.pipeline_configs.read().unwrap().contains_key(pipeline_name) {
+        if !self
+            .runtime
+            .pipeline_configs
+            .read()
+            .unwrap()
+            .contains_key(pipeline_name)
+        {
             return Err(LabError::PipelineError {
                 pipeline: pipeline_name.to_string(),
                 error: format!("Pipeline '{}' not registered", pipeline_name),
@@ -220,7 +256,8 @@ impl ResearchLab {
             "session_id": session_id,
             "status": "completed",
         });
-        self.finish_pipeline_run(&session_id, pipeline_name, &result).await?;
+        self.finish_pipeline_run(&session_id, pipeline_name, &result)
+            .await?;
         Ok(result)
     }
 
@@ -246,11 +283,7 @@ impl ResearchLab {
         self.runtime.memory.get(session_id, key)
     }
 
-    pub fn list_memory_keys(
-        &self,
-        session_id: &str,
-        tags: Option<&[String]>,
-    ) -> Vec<String> {
+    pub fn list_memory_keys(&self, session_id: &str, tags: Option<&[String]>) -> Vec<String> {
         self.runtime.memory.list_keys(session_id, tags)
     }
 
@@ -302,7 +335,10 @@ impl ResearchLab {
         if !self.has_llm() {
             return None;
         }
-        self.runtime.llm.ask(prompt, system, temperature, max_tokens).await
+        self.runtime
+            .llm
+            .ask(prompt, system, temperature, max_tokens)
+            .await
     }
 
     pub async fn ask_llm_messages(
@@ -314,7 +350,10 @@ impl ResearchLab {
         if !self.has_llm() {
             return None;
         }
-        self.runtime.llm.ask_messages(messages, temperature, max_tokens).await
+        self.runtime
+            .llm
+            .ask_messages(messages, temperature, max_tokens)
+            .await
     }
 
     // ─── Workflow Integration ───────────────────────────────────
@@ -383,7 +422,8 @@ impl ResearchLab {
         })?;
 
         let workflow = template.instantiate(workflow_name, Some(&params));
-        self.run_workflow(workflow, session_id, params, executor_fn).await
+        self.run_workflow(workflow, session_id, params, executor_fn)
+            .await
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────
@@ -440,14 +480,28 @@ impl ResearchLab {
         let sessions_active = self.runtime.sessions.active_count().await;
         let agents = self.runtime.sessions.agent_counts().await;
         let operations = self.runtime.counts.lock().unwrap().clone();
-        let pipeline_configs = self.runtime.pipeline_configs.read().unwrap().keys().cloned().collect();
+        let pipeline_configs = self
+            .runtime
+            .pipeline_configs
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
         let memory_entries = self.runtime.memory.entry_count();
-        let permission_policy = self.config.permission_policy.default_restriction_level.clone();
+        let permission_policy = self
+            .config
+            .permission_policy
+            .default_restriction_level
+            .clone();
 
         LabStats {
             running,
             uptime_seconds: uptime,
-            sessions: SessionStats { total: sessions_total, active: sessions_active },
+            sessions: SessionStats {
+                total: sessions_total,
+                active: sessions_active,
+            },
             agents,
             operations,
             pipeline_configs,

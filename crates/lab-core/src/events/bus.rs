@@ -225,7 +225,10 @@ mod tests {
     #[test]
     fn emit_records_history() {
         let bus = EventBus::new(16, 100);
-        bus.emit(LabEvent::new("test.event", serde_json::json!({"key": "val"})));
+        bus.emit(LabEvent::new(
+            "test.event",
+            serde_json::json!({"key": "val"}),
+        ));
         let history = bus.get_history(None, 10);
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].event_type, "test.event");

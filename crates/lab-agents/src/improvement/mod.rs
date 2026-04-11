@@ -25,6 +25,8 @@ pub mod risk;
 pub mod verification;
 
 pub use clippy_runner::{run_clippy, ClippyFinding, SuggestionApplicability};
-pub use edit_strategy::{dispatch, ClippyFixStrategy, DiffPatchStrategy, EditResult, EditStrategy, LLMEditStrategy};
+pub use edit_strategy::{
+    dispatch, ClippyFixStrategy, DiffPatchStrategy, EditResult, EditStrategy, LLMEditStrategy,
+};
 pub use risk::{classify, RiskLevel};
 pub use verification::{VerificationChain, VerificationResult};

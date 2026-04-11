@@ -83,7 +83,10 @@ pub(crate) async fn cmd_chat() -> anyhow::Result<()> {
             println!();
             continue;
         } else if input.starts_with('/') && input != "/" {
-            print_warning(format!("Unknown command '{}' — type /help for a list.", input));
+            print_warning(format!(
+                "Unknown command '{}' — type /help for a list.",
+                input
+            ));
             println!();
             continue;
         }
@@ -151,10 +154,9 @@ pub(crate) async fn cmd_chat() -> anyhow::Result<()> {
                     .unwrap_or_default();
 
                 // Show what we're calling
-                let params_json = serde_json::to_string(
-                    &call.get("params").cloned().unwrap_or_default(),
-                )
-                .unwrap_or_default();
+                let params_json =
+                    serde_json::to_string(&call.get("params").cloned().unwrap_or_default())
+                        .unwrap_or_default();
                 let preview = if params_json.len() > 55 {
                     format!("{}…", &params_json[..55])
                 } else {
@@ -177,10 +179,7 @@ pub(crate) async fn cmd_chat() -> anyhow::Result<()> {
                         .map(|d| summarize_tool_result(tool_name, d))
                         .unwrap_or_else(|| "ok".into())
                 } else {
-                    result["error"]
-                        .as_str()
-                        .unwrap_or("error")
-                        .to_string()
+                    result["error"].as_str().unwrap_or("error").to_string()
                 };
 
                 if success {
@@ -725,7 +724,9 @@ pub(crate) async fn cmd_tool(name: &str, params_json: &str) -> anyhow::Result<()
 
     // Verify tool exists before showing spinner
     if !lab.tools().get(name).await {
-        print_error(format!("Tool '{name}' not found. Run `lab tools` to list available tools."));
+        print_error(format!(
+            "Tool '{name}' not found. Run `lab tools` to list available tools."
+        ));
         return Ok(());
     }
 
@@ -799,7 +800,10 @@ fn strip_tool_calls(text: &str) -> String {
 fn summarize_tool_result(tool_name: &str, data: &serde_json::Value) -> String {
     match tool_name {
         "read_file" => {
-            let n = data.get("total_lines").and_then(|v| v.as_u64()).unwrap_or(0);
+            let n = data
+                .get("total_lines")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("{n} lines")
         }
         "list_directory" => {
@@ -831,11 +835,17 @@ fn summarize_tool_result(tool_name: &str, data: &serde_json::Value) -> String {
             format!("exit {rc}")
         }
         "write_file" => {
-            let n = data.get("bytes_written").and_then(|v| v.as_u64()).unwrap_or(0);
+            let n = data
+                .get("bytes_written")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("{n}B written")
         }
         "edit_file" => {
-            let n = data.get("replacements_made").and_then(|v| v.as_u64()).unwrap_or(0);
+            let n = data
+                .get("replacements_made")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("{n} replacement(s)")
         }
         _ => "ok".to_string(),
@@ -870,9 +880,18 @@ fn build_agent_system_prompt(tools: &[serde_json::Value], config: &LabConfig) ->
     // Group tools by category
     let mut by_cat: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for tool in tools {
-        let name = tool.get("name").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("?");
-        let desc = tool.get("description").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("");
-        let cat = tool.get("category").and_then(|v: &serde_json::Value| v.as_str()).unwrap_or("other");
+        let name = tool
+            .get("name")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("?");
+        let desc = tool
+            .get("description")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("");
+        let cat = tool
+            .get("category")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("other");
         let params = tool_param_hints(name);
         let sig = if params.is_empty() {
             format!("{name}()\n  {desc}")
@@ -884,9 +903,7 @@ fn build_agent_system_prompt(tools: &[serde_json::Value], config: &LabConfig) ->
 
     let tool_manifest: String = by_cat
         .iter()
-        .map(|(cat, sigs)| {
-            format!("### {}\n{}", capitalize(cat), sigs.join("\n\n"))
-        })
+        .map(|(cat, sigs)| format!("### {}\n{}", capitalize(cat), sigs.join("\n\n")))
         .collect::<Vec<_>>()
         .join("\n\n");
 
@@ -1029,10 +1046,7 @@ pub(crate) async fn cmd_improve(
 
     println!();
     println!("{}", "Autonomous Self-Improvement".bright_white().bold());
-    println!(
-        "{}",
-        "Research → Plan → Implement → Verify loop.".dimmed()
-    );
+    println!("{}", "Research → Plan → Implement → Verify loop.".dimmed());
     print_rule();
     print_meta_row("Pattern", pattern);
     print_meta_row("Max candidates", max_candidates);
@@ -1140,7 +1154,10 @@ pub(crate) async fn cmd_improve(
             },
         );
         if report.skipped > 0 {
-            print_meta_row("Remaining", format!("{} (run again to apply)", report.skipped));
+            print_meta_row(
+                "Remaining",
+                format!("{} (run again to apply)", report.skipped),
+            );
         }
         if let Some(ref branch) = report.git_branch {
             print_meta_row("Branch", branch.cyan());
@@ -1165,17 +1182,9 @@ pub(crate) async fn cmd_improve(
                     .chars()
                     .take(55)
                     .collect::<String>();
-                (
-                    "✗".red().bold().to_string(),
-                    reason.yellow().to_string(),
-                )
+                ("✗".red().bold().to_string(), reason.yellow().to_string())
             };
-            println!(
-                "  {}  {}  {}",
-                icon,
-                attempt.file.cyan(),
-                detail
-            );
+            println!("  {}  {}  {}", icon, attempt.file.cyan(), detail);
             println!(
                 "     {}",
                 attempt.task.chars().take(72).collect::<String>().dimmed()
@@ -1199,11 +1208,7 @@ pub(crate) async fn cmd_improve(
     Ok(())
 }
 
-pub(crate) async fn cmd_self_edit(
-    file: &str,
-    task: &str,
-    dry_run: bool,
-) -> anyhow::Result<()> {
+pub(crate) async fn cmd_self_edit(file: &str, task: &str, dry_run: bool) -> anyhow::Result<()> {
     use lab_agents::SelfEditAgent;
     use lab_core::config::AgentProfile;
     use lab_core::LabContainerBuilder;
@@ -1257,7 +1262,11 @@ pub(crate) async fn cmd_self_edit(
     );
 
     let result = with_spinner(
-        if dry_run { "Analysing file" } else { "Editing + verifying" },
+        if dry_run {
+            "Analysing file"
+        } else {
+            "Editing + verifying"
+        },
         agent.execute(
             &mut registry,
             &mut memory,
@@ -1285,7 +1294,9 @@ pub(crate) async fn cmd_self_edit(
             .unwrap_or(0);
 
         if dry_run {
-            print_success(format!("{proposed} edit(s) proposed (dry run — not applied)"));
+            print_success(format!(
+                "{proposed} edit(s) proposed (dry run — not applied)"
+            ));
             println!();
             if let Some(edits) = data.get("edits").and_then(|v| v.as_array()) {
                 for (i, edit) in edits.iter().enumerate() {
@@ -1300,7 +1311,11 @@ pub(crate) async fn cmd_self_edit(
                     let old_preview = old.lines().next().unwrap_or("").trim();
                     let new_preview = new.lines().next().unwrap_or("").trim();
                     println!("    {} {}", "─".bright_black(), old_preview.red().dimmed());
-                    println!("    {} {}", "+".bright_black(), new_preview.green().dimmed());
+                    println!(
+                        "    {} {}",
+                        "+".bright_black(),
+                        new_preview.green().dimmed()
+                    );
                     println!();
                 }
             }
@@ -1359,10 +1374,7 @@ pub(crate) async fn cmd_report(open: bool, output: Option<&str>) -> anyhow::Resu
     print_rule();
 
     if !html_path.exists() {
-        print_warning(format!(
-            "No report found at {}",
-            html_path.display()
-        ));
+        print_warning(format!("No report found at {}", html_path.display()));
         println!();
         print_meta_row("Generate one with", "lab pipeline".cyan());
         print_meta_row("Then open with", "lab report --open".cyan());
@@ -1400,9 +1412,13 @@ pub(crate) async fn cmd_report(open: bool, output: Option<&str>) -> anyhow::Resu
 fn open_in_browser(path: &Path) {
     let path_str = path.to_string_lossy();
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(path_str.as_ref()).spawn();
+    let _ = std::process::Command::new("open")
+        .arg(path_str.as_ref())
+        .spawn();
     #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(path_str.as_ref()).spawn();
+    let _ = std::process::Command::new("xdg-open")
+        .arg(path_str.as_ref())
+        .spawn();
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("cmd")
         .args(["/c", "start", path_str.as_ref()])

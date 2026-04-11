@@ -119,11 +119,14 @@ and review data produced by other agents and distill it into executive-level ins
 Output exactly 3–5 bullet-point insights, followed by a 'Recommended Actions' section with \
 3–5 concrete next steps. Be specific and actionable — no vague suggestions. \
 Write in a technical tone suitable for a senior engineering team.";
-                let prompt = format!(
-                    "Session data:\n\n{context}"
-                );
+                let prompt = format!("Session data:\n\n{context}");
                 match llm_client
-                    .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.2, 512)
+                    .chat(
+                        vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                        model,
+                        0.2,
+                        512,
+                    )
                     .await
                 {
                     Ok(resp) => {

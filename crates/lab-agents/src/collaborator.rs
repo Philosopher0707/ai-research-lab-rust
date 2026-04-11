@@ -56,7 +56,7 @@ impl CollaborationPhase {
         }
     }
 
-    fn into_request(
+    fn as_request(
         &self,
         session_id: &str,
         inherited_pattern: Option<&str>,
@@ -75,7 +75,10 @@ impl CollaborationPhase {
                 .pattern
                 .clone()
                 .or_else(|| inherited_pattern.map(str::to_string)),
-            path: self.path.clone().or_else(|| inherited_path.map(str::to_string)),
+            path: self
+                .path
+                .clone()
+                .or_else(|| inherited_path.map(str::to_string)),
             output_path: self.output_path.clone(),
             content: self.content.clone(),
             template: self.template.clone(),
@@ -135,8 +138,7 @@ impl MultiAgentCollaborator {
         let mut code = CollaborationPhase::new("code", "coder", "generate boilerplate");
         code.template = Some("module".to_string());
 
-        let mut summary =
-            CollaborationPhase::new("summary", "summarizer", "generate summary");
+        let mut summary = CollaborationPhase::new("summary", "summarizer", "generate summary");
         summary.output_path = Some("lab-outputs/collaboration-summary.md".to_string());
 
         vec![research, review, code, summary]
@@ -207,6 +209,7 @@ impl MultiAgentCollaborator {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_with_registry(
         &mut self,
         factory_registry: &AgentFactoryRegistry,
@@ -232,15 +235,15 @@ impl MultiAgentCollaborator {
         let mut phases = Vec::new();
         for phase in self.phases.clone() {
             let phase_start = Instant::now();
-            let request = phase.into_request(&self.session_id, pattern, path);
+            let request = phase.as_request(&self.session_id, pattern, path);
             let agent_id = request.agent_id.clone();
             let phase_name = phase.name.clone();
 
-            let result = match execute_agent_with_context(factory_registry, &mut context, request).await
-            {
-                Ok(result) => result,
-                Err(error) => lab_core::types::AgentResult::fail(error.to_string(), None),
-            };
+            let result =
+                match execute_agent_with_context(factory_registry, &mut context, request).await {
+                    Ok(result) => result,
+                    Err(error) => lab_core::types::AgentResult::fail(error.to_string(), None),
+                };
 
             let phase_result = PhaseResult {
                 name: phase_name.clone(),
@@ -266,7 +269,10 @@ impl MultiAgentCollaborator {
             } else {
                 info!(
                     "Collaborator: {phase_name} phase completed ({:.1}s)",
-                    phases.last().map(|result| result.duration_secs).unwrap_or_default()
+                    phases
+                        .last()
+                        .map(|result| result.duration_secs)
+                        .unwrap_or_default()
                 );
             }
         }

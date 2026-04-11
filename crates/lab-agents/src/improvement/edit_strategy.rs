@@ -25,10 +25,18 @@ pub struct EditResult {
 
 impl EditResult {
     fn ok(file: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Self { success: true, file: file.into(), detail: detail.into() }
+        Self {
+            success: true,
+            file: file.into(),
+            detail: detail.into(),
+        }
     }
     fn err(file: impl Into<PathBuf>, detail: impl Into<String>) -> Self {
-        Self { success: false, file: file.into(), detail: detail.into() }
+        Self {
+            success: false,
+            file: file.into(),
+            detail: detail.into(),
+        }
     }
 }
 
@@ -70,7 +78,9 @@ impl EditStrategy for ClippyFixStrategy {
 
         let file = &finding.file;
         match output {
-            Ok(o) if o.status.success() => EditResult::ok(file, format!("cargo clippy --fix applied ({lint_flag})")),
+            Ok(o) if o.status.success() => {
+                EditResult::ok(file, format!("cargo clippy --fix applied ({lint_flag})"))
+            }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
                 EditResult::err(file, format!("cargo clippy --fix failed: {stderr}"))
@@ -113,7 +123,10 @@ impl EditStrategy for DiffPatchStrategy {
             return EditResult::err(&finding.file, "LLM returned no unified diff".to_string());
         }
 
-        match diffy::apply(&source, &diffy::Patch::from_str(&patch).unwrap_or_else(|_| diffy::Patch::from_str("").unwrap())) {
+        match diffy::apply(
+            &source,
+            &diffy::Patch::from_str(&patch).unwrap_or_else(|_| diffy::Patch::from_str("").unwrap()),
+        ) {
             Ok(patched) => {
                 if let Err(e) = tokio::fs::write(&file_path, patched).await {
                     return EditResult::err(&finding.file, format!("write error: {e}"));
@@ -249,8 +262,14 @@ fn build_edit_prompt(finding: &ClippyFinding, target: &str) -> String {
 fn extract_replacement(text: &str) -> String {
     let text = text.trim();
     // Strip markdown code block if present
-    if let Some(inner) = text.strip_prefix("```rust\n").or_else(|| text.strip_prefix("```\n")) {
-        if let Some(body) = inner.strip_suffix("\n```").or_else(|| inner.strip_suffix("```")) {
+    if let Some(inner) = text
+        .strip_prefix("```rust\n")
+        .or_else(|| text.strip_prefix("```\n"))
+    {
+        if let Some(body) = inner
+            .strip_suffix("\n```")
+            .or_else(|| inner.strip_suffix("```"))
+        {
             return body.to_string();
         }
     }

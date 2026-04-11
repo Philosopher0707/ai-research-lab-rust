@@ -47,7 +47,11 @@ impl SessionService {
         let session = LabSession::new(id.clone(), name.to_string());
         let clone = session.clone();
 
-        self.state.write().await.sessions.insert(id.clone(), session);
+        self.state
+            .write()
+            .await
+            .sessions
+            .insert(id.clone(), session);
 
         self.event_bus.emit(LabEvent::new(
             "session.created",
@@ -114,12 +118,7 @@ impl SessionService {
 
     // ─── Agent registry ──────────────────────────────────────────
 
-    pub async fn register_agent(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-        meta: serde_json::Value,
-    ) {
+    pub async fn register_agent(&self, session_id: &str, agent_id: &str, meta: serde_json::Value) {
         let mut guard = self.state.write().await;
         guard
             .agent_registry
@@ -151,11 +150,7 @@ impl SessionService {
         false
     }
 
-    pub async fn get_agent(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Option<serde_json::Value> {
+    pub async fn get_agent(&self, session_id: &str, agent_id: &str) -> Option<serde_json::Value> {
         self.state
             .read()
             .await
@@ -178,7 +173,12 @@ impl SessionService {
 
     /// Load any previously active sessions from the persistent store.
     pub async fn restore(&self) -> usize {
-        match self.store.lock().await.query(Some("active"), None, None, 0, 0) {
+        match self
+            .store
+            .lock()
+            .await
+            .query(Some("active"), None, None, 0, 0)
+        {
             Ok(records) => {
                 let count = records.len();
                 let mut guard = self.state.write().await;

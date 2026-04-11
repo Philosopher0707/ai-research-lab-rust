@@ -54,9 +54,7 @@ Rules:\n\
 - Do NOT suggest changes to test files\n\
 - Output ONLY the <candidates>...</candidates> block";
 
-    let prompt = format!(
-        "Generate up to {max_candidates} improvement candidates.\n\n{context}"
-    );
+    let prompt = format!("Generate up to {max_candidates} improvement candidates.\n\n{context}");
 
     match llm
         .chat(
@@ -86,9 +84,15 @@ fn build_context(
 
     // Researcher summary
     if let Some(r) = researcher_data {
-        let files = r.get("files_analysed").and_then(|v| v.as_u64()).unwrap_or(0);
+        let files = r
+            .get("files_analysed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let classes = r.get("total_classes").and_then(|v| v.as_u64()).unwrap_or(0);
-        let fns = r.get("total_functions").and_then(|v| v.as_u64()).unwrap_or(0);
+        let fns = r
+            .get("total_functions")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         ctx.push_str(&format!(
             "## Codebase Overview\nFiles: {files} | Classes/Structs: {classes} | Functions: {fns}\n\n"
         ));
@@ -97,19 +101,37 @@ fn build_context(
         if let Some(arr) = r.get("files").and_then(|v| v.as_array()) {
             let mut files_vec: Vec<_> = arr.iter().collect();
             files_vec.sort_by(|a, b| {
-                let fa = a.get("async_functions").and_then(|v| v.as_u64()).unwrap_or(0)
-                    + a.get("sync_functions").and_then(|v| v.as_u64()).unwrap_or(0);
-                let fb = b.get("async_functions").and_then(|v| v.as_u64()).unwrap_or(0)
-                    + b.get("sync_functions").and_then(|v| v.as_u64()).unwrap_or(0);
+                let fa = a
+                    .get("async_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    + a.get("sync_functions")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                let fb = b
+                    .get("async_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    + b.get("sync_functions")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                 fb.cmp(&fa)
             });
             ctx.push_str("### Most complex files:\n");
             for f in files_vec.iter().take(12) {
                 let path = f.get("path").and_then(|v| v.as_str()).unwrap_or("?");
                 let lines = f.get("total_lines").and_then(|v| v.as_u64()).unwrap_or(0);
-                let afns = f.get("async_functions").and_then(|v| v.as_u64()).unwrap_or(0);
-                let sfns = f.get("sync_functions").and_then(|v| v.as_u64()).unwrap_or(0);
-                ctx.push_str(&format!("- {path}  ({lines}L, {afns} async + {sfns} sync fns)\n"));
+                let afns = f
+                    .get("async_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let sfns = f
+                    .get("sync_functions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                ctx.push_str(&format!(
+                    "- {path}  ({lines}L, {afns} async + {sfns} sync fns)\n"
+                ));
             }
             ctx.push('\n');
         }
@@ -120,15 +142,18 @@ fn build_context(
         ctx.push_str("## Code Quality Issues\n");
         if let Some(s) = rv.get("summary") {
             let total = s.get("total_issues").and_then(|v| v.as_u64()).unwrap_or(0);
-            let reviewed = s.get("files_reviewed").and_then(|v| v.as_u64()).unwrap_or(0);
-            ctx.push_str(&format!("Total: {total} issues across {reviewed} files\n\n"));
+            let reviewed = s
+                .get("files_reviewed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            ctx.push_str(&format!(
+                "Total: {total} issues across {reviewed} files\n\n"
+            ));
 
             if let Some(by_rule) = s.get("by_rule").and_then(|v| v.as_object()) {
                 ctx.push_str("By rule:\n");
                 let mut rules: Vec<_> = by_rule.iter().collect();
-                rules.sort_by(|a, b| {
-                    b.1.as_u64().unwrap_or(0).cmp(&a.1.as_u64().unwrap_or(0))
-                });
+                rules.sort_by(|a, b| b.1.as_u64().unwrap_or(0).cmp(&a.1.as_u64().unwrap_or(0)));
                 for (rule, count) in rules.iter().take(8) {
                     ctx.push_str(&format!("  {rule}: {count}\n"));
                 }
@@ -198,6 +223,5 @@ fn parse_candidates(text: &str) -> Vec<ImprovementCandidate> {
         Some(i) => start + i,
         None => return Vec::new(),
     };
-    serde_json::from_str::<Vec<ImprovementCandidate>>(text[start..end].trim())
-        .unwrap_or_default()
+    serde_json::from_str::<Vec<ImprovementCandidate>>(text[start..end].trim()).unwrap_or_default()
 }

@@ -96,7 +96,12 @@ Be precise and technical. Avoid filler phrases like 'This file contains' — jus
                             let prompt = format!("File: {fp}\n\n{truncated}");
                             match self
                                 .client
-                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 1024)
+                                .chat(
+                                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                                    &self.model,
+                                    0.2,
+                                    1024,
+                                )
                                 .await
                             {
                                 Ok(response) => {
@@ -211,7 +216,12 @@ Be terse and direct — engineering quality review, not a tutorial.";
                             let prompt = format!("File: {fp}\n\n```\n{content}\n```");
                             match self
                                 .client
-                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+                                .chat(
+                                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                                    &self.model,
+                                    0.2,
+                                    2048,
+                                )
                                 .await
                             {
                                 Ok(response) => {
@@ -319,7 +329,12 @@ Write in a direct, technical tone. Max 500 words total.";
         let prompt = format!("Agent findings:\n\n{context}");
         match self
             .client
-            .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], &self.model, 0.2, 2048)
+            .chat(
+                vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                &self.model,
+                0.2,
+                2048,
+            )
             .await
         {
             Ok(response) => {

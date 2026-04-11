@@ -44,6 +44,7 @@ impl ResearcherAgent {
     ///
     /// Without LLM: discovers files, counts classes/functions (heuristic)
     /// With LLM: additionally analyzes architecture, patterns, and dependencies
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,
@@ -239,12 +240,15 @@ Your role is to identify the purpose, design patterns, and key responsibilities 
 Be concise and technical. Focus on: what the module does, what abstractions it introduces, \
 and how it fits into the larger system. Respond in 2-3 sentences maximum.";
 
-                            let prompt = format!(
-                                "File: {fp}\n\n{truncated}"
-                            );
+                            let prompt = format!("File: {fp}\n\n{truncated}");
 
                             match llm
-                                .chat(vec![ChatMessage::system(system), ChatMessage::user(prompt)], model, 0.1, 256)
+                                .chat(
+                                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                                    model,
+                                    0.1,
+                                    256,
+                                )
                                 .await
                             {
                                 Ok(resp) => {

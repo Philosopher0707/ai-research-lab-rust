@@ -107,7 +107,9 @@ fn provider_default_model(provider: &str) -> &'static str {
 }
 
 fn provider_supports_keyless_access(provider: &str) -> bool {
-    providers::find(provider).map(|p| p.keyless).unwrap_or(false)
+    providers::find(provider)
+        .map(|p| p.keyless)
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -782,8 +784,7 @@ impl LabConfig {
         let save_path = path
             .cloned()
             .unwrap_or_else(|| self.workspace.join("lab-config.toml"));
-        let content = toml::to_string_pretty(self)
-            .map_err(std::io::Error::other)?;
+        let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         if let Some(parent) = save_path.parent() {
             std::fs::create_dir_all(parent)?;
         }

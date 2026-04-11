@@ -20,6 +20,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+type WorkflowStepFuture = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<serde_json::Value, lab_core::LabError>> + Send>,
+>;
+
 struct PipelineExecutionContext {
     config: LabConfig,
     pipeline_name: String,
@@ -100,9 +104,8 @@ fn ask_messages(req: &AskRequest) -> Vec<ChatMessage> {
 fn workflow_executor() -> impl Fn(
     &lab_core::workflows::WorkflowStep,
     &HashMap<String, serde_json::Value>,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<serde_json::Value, lab_core::LabError>> + Send>,
-> + Send
+) -> WorkflowStepFuture
+       + Send
        + Sync {
     |_step, _ctx| {
         let future = async { Ok::<_, lab_core::LabError>(serde_json::json!({"executed": true})) };
@@ -199,7 +202,12 @@ pub async fn store_memory(
     Json(req): Json<MemoryRequest>,
 ) -> impl IntoResponse {
     let lab = &state.lab;
-    let entry = lab.store_memory(&req.session_id, &req.key, &req.value, Some(req.tags.clone()));
+    let entry = lab.store_memory(
+        &req.session_id,
+        &req.key,
+        &req.value,
+        Some(req.tags.clone()),
+    );
     Json(MemoryResponse {
         key: entry.key,
         value: entry.value,
@@ -335,7 +343,12 @@ pub async fn run_agent(
     {
         let lab = &state.lab;
         let key = format!("agent_result_{agent_id}");
-        lab.store_memory(&req.session_id, &key, &result.data, Some(vec!["agent_result".into()]));
+        lab.store_memory(
+            &req.session_id,
+            &key,
+            &result.data,
+            Some(vec!["agent_result".into()]),
+        );
     }
 
     (

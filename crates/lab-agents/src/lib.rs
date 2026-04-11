@@ -24,21 +24,20 @@ pub mod runtime;
 pub mod self_edit;
 pub mod summarizer;
 
+pub use autonomous_improvement::{
+    AutonomousImprovementPipeline, ImprovementAttempt, ImprovementConfig, ImprovementReport,
+};
 pub use base::AgentImpl;
 pub use coder::CoderAgent;
 pub use collaborator::{CollaborationPhase, MultiAgentCollaborator};
 pub use communication::{AgentCommunicator, AgentMessage, MessageType};
+pub use improvement_planner::ImprovementCandidate;
 pub use researcher::ResearcherAgent;
 pub use reviewer::ReviewerAgent;
 pub use runtime::{
-    execute_agent, execute_agent_with_context, execute_agent_with_registry,
-    supported_agent_types, AgentExecutionContext, AgentExecutionRequest, AgentFactory,
-    AgentFactoryRegistry, AgentPlugin,
+    execute_agent, execute_agent_with_context, execute_agent_with_registry, supported_agent_types,
+    AgentExecutionContext, AgentExecutionRequest, AgentFactory, AgentFactoryRegistry, AgentPlugin,
 };
-pub use autonomous_improvement::{
-    AutonomousImprovementPipeline, ImprovementAttempt, ImprovementConfig, ImprovementReport,
-};
-pub use improvement_planner::ImprovementCandidate;
 pub use self_edit::SelfEditAgent;
 pub use summarizer::SummarizerAgent;
 

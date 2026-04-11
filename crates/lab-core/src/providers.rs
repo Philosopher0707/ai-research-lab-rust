@@ -119,8 +119,16 @@ mod tests {
     fn all_providers_have_defaults() {
         for p in PROVIDERS {
             assert!(!p.id.is_empty(), "provider has empty id");
-            assert!(!p.base_url.is_empty() || p.keyless, "provider {} missing base_url", p.id);
-            assert!(!p.default_model.is_empty(), "provider {} missing default_model", p.id);
+            assert!(
+                !p.base_url.is_empty() || p.keyless,
+                "provider {} missing base_url",
+                p.id
+            );
+            assert!(
+                !p.default_model.is_empty(),
+                "provider {} missing default_model",
+                p.id
+            );
         }
     }
 

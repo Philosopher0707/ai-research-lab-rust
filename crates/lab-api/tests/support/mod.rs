@@ -3,6 +3,7 @@ use lab_core::LabConfig;
 use std::sync::Arc;
 
 pub struct TestServer {
+    #[allow(dead_code)] // used by runtime_endpoints tests; not by all test binaries
     pub state: Arc<AppState>,
     pub base_url: String,
     shutdown_tx: tokio::sync::oneshot::Sender<()>,

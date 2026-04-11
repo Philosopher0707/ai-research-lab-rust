@@ -51,7 +51,11 @@ impl ToolService {
         tool_name: &str,
         params: &HashMap<String, serde_json::Value>,
     ) -> HashMap<String, serde_json::Value> {
-        self.permission.lock().await.check(agent_id, tool_name, params).await
+        self.permission
+            .lock()
+            .await
+            .check(agent_id, tool_name, params)
+            .await
     }
 
     // ─── Tool execution ────────────────────────────────────────────

@@ -70,14 +70,7 @@ pub struct TaskQueue {
     max_workers: usize,
     running_flag: bool,
     new_task_notify: Arc<Notify>,
-    // Executor closure to actually run a task
-    executor: Option<
-        Arc<
-            dyn Fn(&TaskSpec) -> tokio::sync::oneshot::Receiver<Result<serde_json::Value>>
-                + Send
-                + Sync,
-        >,
-    >,
+    executor: Option<Arc<TaskExecutor>>,
 }
 
 impl TaskQueue {

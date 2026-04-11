@@ -196,9 +196,11 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
         }
-        Some(Commands::SelfEdit { file, task, dry_run }) => {
-            commands::cmd_self_edit(&file, &task, dry_run).await
-        }
+        Some(Commands::SelfEdit {
+            file,
+            task,
+            dry_run,
+        }) => commands::cmd_self_edit(&file, &task, dry_run).await,
         Some(Commands::Report { open, output }) => {
             commands::cmd_report(open, output.as_deref()).await
         }

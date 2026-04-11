@@ -72,7 +72,13 @@ impl VerificationChain {
     /// Snapshot the current clippy warning count to use as baseline.
     pub async fn snapshot_baseline(workspace: &Path) -> usize {
         let out = tokio::process::Command::new("cargo")
-            .args(["clippy", "--message-format", "json", "--workspace", "--quiet"])
+            .args([
+                "clippy",
+                "--message-format",
+                "json",
+                "--workspace",
+                "--quiet",
+            ])
             .current_dir(workspace)
             .output()
             .await
@@ -96,7 +102,9 @@ impl VerificationChain {
         let fmt_ok = self.run_rustfmt(&abs_file).await;
         result.rustfmt_ok = fmt_ok;
         if !fmt_ok {
-            result.details.push(format!("rustfmt: failed on {}", edited_file.display()));
+            result
+                .details
+                .push(format!("rustfmt: failed on {}", edited_file.display()));
             // Not a hard failure — formatting issues don't break compilation.
         }
 
@@ -116,7 +124,9 @@ impl VerificationChain {
         result.cargo_check_ok = check_ok;
         if !check_ok {
             result.passed = false;
-            result.details.push("cargo check: compilation failed".to_string());
+            result
+                .details
+                .push("cargo check: compilation failed".to_string());
             // If the code doesn't compile, skip tests.
             return result;
         }
@@ -127,7 +137,9 @@ impl VerificationChain {
             result.tests_ok = Some(tests_ok);
             if !tests_ok {
                 result.passed = false;
-                result.details.push("cargo test: test suite failed".to_string());
+                result
+                    .details
+                    .push("cargo test: test suite failed".to_string());
             }
         }
 
@@ -148,7 +160,13 @@ impl VerificationChain {
 
     async fn count_clippy_warnings(&self) -> usize {
         let out = tokio::process::Command::new("cargo")
-            .args(["clippy", "--message-format", "json", "--workspace", "--quiet"])
+            .args([
+                "clippy",
+                "--message-format",
+                "json",
+                "--workspace",
+                "--quiet",
+            ])
             .current_dir(&self.workspace)
             .output()
             .await

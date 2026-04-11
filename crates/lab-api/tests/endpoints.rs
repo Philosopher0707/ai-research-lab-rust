@@ -11,8 +11,7 @@ async fn make_server() -> (TestServer, reqwest::Client) {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(workspace.path().join("src")).unwrap();
     std::fs::write(workspace.path().join("src/lib.rs"), "// hello\n").unwrap();
-    let server =
-        TestServer::start(LabConfig::with_workspace(workspace.path().to_path_buf())).await;
+    let server = TestServer::start(LabConfig::with_workspace(workspace.path().to_path_buf())).await;
     let client = reqwest::Client::new();
     (server, client)
 }
@@ -170,8 +169,16 @@ async fn event_history_records_session_events() {
     assert!(!events.is_empty());
 
     let types: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
-    assert!(types.contains(&"session.created"), "expected session.created in {:?}", types);
-    assert!(types.contains(&"session.closed"),  "expected session.closed in {:?}", types);
+    assert!(
+        types.contains(&"session.created"),
+        "expected session.created in {:?}",
+        types
+    );
+    assert!(
+        types.contains(&"session.closed"),
+        "expected session.closed in {:?}",
+        types
+    );
 
     server.shutdown().await;
 }
@@ -183,7 +190,10 @@ async fn event_history_filter_by_type() {
     create_session(&client, &server.base_url, "filter-test").await;
 
     let history: Value = client
-        .get(format!("{}/events/history?filter=session.created", server.base_url))
+        .get(format!(
+            "{}/events/history?filter=session.created",
+            server.base_url
+        ))
         .send()
         .await
         .unwrap()
@@ -245,7 +255,10 @@ async fn memory_tag_filter_returns_only_matching_keys() {
     }
 
     let keys: Value = client
-        .get(format!("{}/memory/{}?tags=report", server.base_url, session_id))
+        .get(format!(
+            "{}/memory/{}?tags=report",
+            server.base_url, session_id
+        ))
         .send()
         .await
         .unwrap()

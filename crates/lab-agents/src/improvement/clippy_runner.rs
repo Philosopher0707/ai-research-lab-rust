@@ -97,7 +97,13 @@ struct DiagnosticChild {
 /// Hard errors and `#[allow]`-suppressed lints are excluded.
 pub async fn run_clippy(workspace: &Path) -> Vec<ClippyFinding> {
     let output = tokio::process::Command::new("cargo")
-        .args(["clippy", "--message-format", "json", "--workspace", "--quiet"])
+        .args([
+            "clippy",
+            "--message-format",
+            "json",
+            "--workspace",
+            "--quiet",
+        ])
         .current_dir(workspace)
         .output()
         .await;

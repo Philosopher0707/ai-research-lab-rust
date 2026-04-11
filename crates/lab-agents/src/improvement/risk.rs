@@ -53,7 +53,10 @@ pub fn classify(finding: &ClippyFinding) -> RiskLevel {
     }
 
     if finding.suggested_replacement.is_some()
-        && !matches!(finding.applicability, SuggestionApplicability::HasPlaceholders)
+        && !matches!(
+            finding.applicability,
+            SuggestionApplicability::HasPlaceholders
+        )
     {
         return RiskLevel::Patch;
     }
@@ -106,7 +109,12 @@ mod tests {
     use crate::improvement::clippy_runner::ClippyFinding;
     use std::path::PathBuf;
 
-    fn finding(lint: &str, applicability: SuggestionApplicability, replacement: Option<&str>, byte_start: Option<u32>) -> ClippyFinding {
+    fn finding(
+        lint: &str,
+        applicability: SuggestionApplicability,
+        replacement: Option<&str>,
+        byte_start: Option<u32>,
+    ) -> ClippyFinding {
         ClippyFinding {
             lint: lint.to_string(),
             file: PathBuf::from("src/lib.rs"),

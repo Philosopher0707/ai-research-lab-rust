@@ -158,9 +158,16 @@ pub fn render_research_html(ctx: &ResearchReportContext) -> String {
             } else {
                 ("✗", "icon-fail", "stage-bar stage-bar-failed")
             };
-            let err_html = s.error.as_deref().map(|e| {
-                format!("<div style='font-size:0.72rem;color:#c62828;margin-top:2px'>{}</div>", he(e))
-            }).unwrap_or_default();
+            let err_html = s
+                .error
+                .as_deref()
+                .map(|e| {
+                    format!(
+                        "<div style='font-size:0.72rem;color:#c62828;margin-top:2px'>{}</div>",
+                        he(e)
+                    )
+                })
+                .unwrap_or_default();
             format!(
                 "<div class='stage'>\
                    <div class='stage-icon {icon_cls}'>{icon}</div>\
@@ -178,11 +185,7 @@ pub fn render_research_html(ctx: &ResearchReportContext) -> String {
         .collect();
 
     // ── File-type chart HTML ─────────────────────────────────────
-    let max_count = file_type_counts
-        .iter()
-        .map(|(_, c)| *c)
-        .max()
-        .unwrap_or(1) as f64;
+    let max_count = file_type_counts.iter().map(|(_, c)| *c).max().unwrap_or(1) as f64;
 
     let type_chart_html: String = file_type_counts
         .iter()
@@ -339,7 +342,11 @@ pub fn render_research_html(ctx: &ResearchReportContext) -> String {
         .unwrap_or_default();
 
     // ── Assemble ─────────────────────────────────────────────────
-    let issues_card_class = if total_issues > 0 { "value-warn" } else { "value-ok" };
+    let issues_card_class = if total_issues > 0 {
+        "value-warn"
+    } else {
+        "value-ok"
+    };
 
     let mut html = String::with_capacity(64_000);
 
@@ -419,9 +426,7 @@ pub fn render_research_html(ctx: &ResearchReportContext) -> String {
 
 // ─── Report Data Extractors ──────────────────────────────────────
 
-fn extract_discover(
-    v: &Option<serde_json::Value>,
-) -> (u64, Vec<(String, usize)>, Vec<String>) {
+fn extract_discover(v: &Option<serde_json::Value>) -> (u64, Vec<(String, usize)>, Vec<String>) {
     let Some(disc) = v else {
         return (0, Vec::new(), Vec::new());
     };
@@ -430,8 +435,7 @@ fn extract_discover(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
-    let mut counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     if let Some(arr) = disc.get("file_types").and_then(|v| v.as_array()) {
         for t in arr {
             if let Some(ext) = t.as_str() {
@@ -456,9 +460,15 @@ fn extract_discover(
     (total, types, dirs)
 }
 
-fn extract_researcher(
-    v: &Option<serde_json::Value>,
-) -> (u64, u64, u64, Vec<(String, u64, u64, u64)>, Vec<(String, String)>) {
+type ResearcherStats = (
+    u64,
+    u64,
+    u64,
+    Vec<(String, u64, u64, u64)>,
+    Vec<(String, String)>,
+);
+
+fn extract_researcher(v: &Option<serde_json::Value>) -> ResearcherStats {
     let Some(rm) = v else {
         return (0, 0, 0, Vec::new(), Vec::new());
     };
@@ -483,10 +493,7 @@ fn extract_researcher(
                 .take(30)
                 .filter_map(|f| {
                     let path = f.get("path").and_then(|v| v.as_str())?.to_string();
-                    let lines = f
-                        .get("total_lines")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
+                    let lines = f.get("total_lines").and_then(|v| v.as_u64()).unwrap_or(0);
                     let classes = f
                         .get("class_names")
                         .and_then(|v| v.as_array())
@@ -513,8 +520,7 @@ fn extract_researcher(
             arr.iter()
                 .filter_map(|a| {
                     let path = a.get("path").and_then(|v| v.as_str())?.to_string();
-                    let analysis =
-                        a.get("llm_analysis").and_then(|v| v.as_str())?.to_string();
+                    let analysis = a.get("llm_analysis").and_then(|v| v.as_str())?.to_string();
                     Some((path, analysis))
                 })
                 .collect()
@@ -524,9 +530,9 @@ fn extract_researcher(
     (fa, tc, tf, files, llm)
 }
 
-fn extract_review(
-    v: &Option<serde_json::Value>,
-) -> (u64, u64, Vec<(String, u64)>, Vec<(String, String)>) {
+type ReviewStats = (u64, u64, Vec<(String, u64)>, Vec<(String, String)>);
+
+fn extract_review(v: &Option<serde_json::Value>) -> ReviewStats {
     let Some(rv) = v else {
         return (0, 0, Vec::new(), Vec::new());
     };
