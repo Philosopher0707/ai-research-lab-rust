@@ -8,6 +8,7 @@ lab-core.workspace = true
 lab-agents.workspace = true
 lab-tools.workspace = true
 lab-memory.workspace = true
+lab-reports.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

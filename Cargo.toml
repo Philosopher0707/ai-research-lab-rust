@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 
@@ -49,7 +49,10 @@ md-5 = "0.10"
 sha2 = "0.10"
 tempfile = "3"
 anyhow = "1"
+atty = "0.2"
+dotenvy = "0.15"
 axum = { version = "0.8", features = ["ws"] }
 tokio-tungstenite = "0.26"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+diffy = "0.4"

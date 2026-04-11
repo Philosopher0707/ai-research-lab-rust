@@ -2,7 +2,7 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
-use lab_core::llm::LLMClient;
+use lab_core::llm::ChatMessage;
 use lab_core::types::AgentResult;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -18,15 +18,25 @@ impl SummarizerAgent {
     pub fn new(id: String, session_id: String, profile: AgentProfile, workspace: PathBuf) -> Self {
         Self {
             impl_: AgentImpl::new(
-                id.clone(), "summarizer".into(), session_id, profile, workspace.clone(),
+                id.clone(),
+                "summarizer".into(),
+                session_id,
+                profile,
+                workspace.clone(),
             ),
             workspace,
         }
     }
 
-    pub fn id(&self) -> &str { self.impl_.id() }
-    pub fn session_id(&self) -> &str { self.impl_.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.impl_.state() }
+    pub fn id(&self) -> &str {
+        self.impl_.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.impl_.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.impl_.state()
+    }
 
     /// Execute: pull data from memory and generate a consolidated markdown report.
     pub async fn execute(
@@ -35,8 +45,8 @@ impl SummarizerAgent {
         memory: &mut MemoryWorkspace,
         task: &str,
         output_path: Option<&str>,
-        _llm: Option<&dyn lab_core::llm::LLMClient>,
-        _model: Option<&str>,
+        llm: Option<&dyn lab_core::llm::LLMClient>,
+        model: Option<&str>,
     ) -> AgentResult {
         if let Err(e) = self.impl_.start().await {
             return AgentResult::fail(e.to_string(), None);
@@ -99,14 +109,52 @@ impl SummarizerAgent {
         let keys = self.impl_.list_memory_keys(memory, None);
         report.push_str(&format!("## Memory\n\n- Keys: {}\n", keys.join(", ")));
 
+        // LLM synthesis — append AI insights to the report
+        if let (Some(llm_client), Some(model)) = (llm, model) {
+            let context: String = report.chars().take(3000).collect();
+            if !context.is_empty() {
+                let system = "\
+You are the synthesis agent for the AI Research Lab. Your role is to read structured research \
+and review data produced by other agents and distill it into executive-level insights. \
+Output exactly 3–5 bullet-point insights, followed by a 'Recommended Actions' section with \
+3–5 concrete next steps. Be specific and actionable — no vague suggestions. \
+Write in a technical tone suitable for a senior engineering team.";
+                let prompt = format!("Session data:\n\n{context}");
+                match llm_client
+                    .chat(
+                        vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                        model,
+                        0.2,
+                        512,
+                    )
+                    .await
+                {
+                    Ok(resp) => {
+                        report.push_str("\n## AI Insights\n\n");
+                        report.push_str(&resp.content);
+                        report.push('\n');
+                    }
+                    Err(e) => tracing::warn!("LLM synthesis failed: {}", e),
+                }
+            }
+        }
+
         // Write report to disk
         let out = output_path.unwrap_or("lab-outputs/summary.md");
-        let write_result = registry.execute("write_file", &HashMap::from([
-            ("path".into(), serde_json::json!(out)),
-            ("content".into(), serde_json::json!(&report)),
-        ])).await;
+        let write_result = registry
+            .execute(
+                "write_file",
+                &HashMap::from([
+                    ("path".into(), serde_json::json!(out)),
+                    ("content".into(), serde_json::json!(&report)),
+                ]),
+            )
+            .await;
 
-        let success = write_result.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let success = write_result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let results = serde_json::json!({
             "task": task,
             "summary_written": success,

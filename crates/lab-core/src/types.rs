@@ -17,6 +17,17 @@ pub enum SessionStatus {
     Failed,
 }
 
+impl SessionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabSession {
     pub id: String,
@@ -59,7 +70,7 @@ impl LabSession {
             "tasks_completed": self.tasks_completed,
             "tasks_failed": self.tasks_failed,
             "total_tokens_used": self.total_tokens_used,
-            "status": format!("{:?}", self.status).to_lowercase(),
+            "status": self.status.as_str(),
             "artifacts": self.artifacts,
             "metadata": self.metadata,
         })
@@ -80,7 +91,11 @@ pub trait Agent: Send + Sync {
     fn session_id(&self) -> &str;
     fn profile(&self) -> &AgentProfile;
     async fn start(&mut self) -> Result<AgentResult>;
-    async fn run_task(&mut self, task: &str, kwargs: HashMap<String, serde_json::Value>) -> Result<AgentResult>;
+    async fn run_task(
+        &mut self,
+        task: &str,
+        kwargs: HashMap<String, serde_json::Value>,
+    ) -> Result<AgentResult>;
     async fn cleanup(&mut self);
     fn state(&self) -> AgentState;
 }

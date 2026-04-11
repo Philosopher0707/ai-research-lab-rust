@@ -1,27 +1,21 @@
 //! Task models — TaskSpec, priorities, statuses, and types.
 //! Mirrors core/scheduler/models.py
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid;
 
 // ─── Priority ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum TaskPriority {
     Low = 0,
+    #[default]
     Normal = 1,
     High = 2,
     Critical = 3,
-}
-
-impl Default for TaskPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 // ─── Status ────────────────────────────────────────────────────────
@@ -119,11 +113,21 @@ pub struct TaskSpec {
     pub assigned_agent_id: Option<String>,
 }
 
-fn default_max_retries() -> u32 { 2 }
-fn default_timeout() -> u64 { 1800 }
-fn default_queued() -> TaskStatus { TaskStatus::Queued }
-fn default_instant() -> std::time::Instant { std::time::Instant::now() }
-fn default_instant_opt() -> Option<std::time::Instant> { None }
+fn default_max_retries() -> u32 {
+    2
+}
+fn default_timeout() -> u64 {
+    1800
+}
+fn default_queued() -> TaskStatus {
+    TaskStatus::Queued
+}
+fn default_instant() -> std::time::Instant {
+    std::time::Instant::now()
+}
+fn default_instant_opt() -> Option<std::time::Instant> {
+    None
+}
 
 impl Default for TaskSpec {
     fn default() -> Self {

@@ -26,7 +26,7 @@ pub struct AgentImpl {
     state: AgentState,
     metrics: AgentMetrics,
     cancel_flag: Arc<Mutex<bool>>,
-    workspace: std::path::PathBuf,
+    _workspace: std::path::PathBuf,
 }
 
 impl AgentImpl {
@@ -46,7 +46,7 @@ impl AgentImpl {
             state: AgentState::Initialized,
             metrics: AgentMetrics::default(),
             cancel_flag: Arc::new(Mutex::new(false)),
-            workspace,
+            _workspace: workspace,
         }
     }
 
@@ -99,7 +99,13 @@ impl AgentImpl {
     }
 
     /// Search memory.
-    pub fn search_memory(&self, memory: &MemoryWorkspace, query: &str, tags: Option<&[String]>, limit: usize) -> Vec<serde_json::Value> {
+    pub fn search_memory(
+        &self,
+        memory: &MemoryWorkspace,
+        query: &str,
+        tags: Option<&[String]>,
+        limit: usize,
+    ) -> Vec<serde_json::Value> {
         memory.search(&self.session_id, query, tags, limit)
     }
 
@@ -122,10 +128,7 @@ impl AgentImpl {
         temperature: f64,
         max_tokens: u32,
     ) -> Option<String> {
-        let messages = vec![
-            ChatMessage::system(system),
-            ChatMessage::user(prompt),
-        ];
+        let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
         match client.chat(messages, model, temperature, max_tokens).await {
             Ok(resp) => Some(resp.content),
             Err(e) => {
@@ -166,10 +169,7 @@ impl AgentImpl {
         let elapsed = self.metrics.elapsed_secs();
         info!(
             "Agent cleaned up: {} ({:.1}s, {} tool calls, {} errors)",
-            self.id,
-            elapsed,
-            self.metrics.tool_calls,
-            self.metrics.tool_errors,
+            self.id, elapsed, self.metrics.tool_calls, self.metrics.tool_errors,
         );
     }
 
@@ -232,10 +232,7 @@ impl Agent for AgentImpl {
         let elapsed = self.metrics.elapsed_secs();
         info!(
             "Agent cleaned up: {} ({:.1}s, {} tool calls, {} errors)",
-            self.id,
-            elapsed,
-            self.metrics.tool_calls,
-            self.metrics.tool_errors,
+            self.id, elapsed, self.metrics.tool_calls, self.metrics.tool_errors,
         );
     }
 

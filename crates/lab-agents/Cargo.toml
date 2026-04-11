@@ -19,3 +19,4 @@ regex.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 colored.workspace = true
+diffy.workspace = true

@@ -14,3 +14,7 @@ async-trait.workspace = true
 globset.workspace = true
 walkdir.workspace = true
 tracing.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

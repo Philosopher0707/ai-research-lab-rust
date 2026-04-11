@@ -23,3 +23,8 @@ tower-http.workspace = true
 futures = "0.3"
 uuid.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+lab-core.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true

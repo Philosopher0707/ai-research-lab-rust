@@ -9,30 +9,21 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use tracing::debug;
-
-static EMPTY_MAP: OnceLock<HashMap<String, MemoryEntry>> = OnceLock::new();
-fn empty_map() -> &'static HashMap<String, MemoryEntry> {
-    EMPTY_MAP.get_or_init(HashMap::new)
-}
 
 // ─── Stop words ───────────────────────────────────────────────────
 
 const STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
-    "should", "may", "might", "must", "can", "could", "it", "its", "to",
-    "of", "in", "for", "on", "with", "at", "by", "from", "as", "into",
-    "through", "during", "before", "after", "and", "but", "or", "nor",
-    "not", "so", "yet", "both", "either", "neither", "each", "every",
-    "all", "any", "few", "more", "most", "other", "some", "such", "no",
-    "only", "own", "same", "than", "too", "very", "just", "if", "because",
-    "until", "while", "about", "between", "under", "again", "there",
-    "then", "once", "here", "where", "when", "what", "which", "who",
-    "whom", "that", "this", "these", "those", "me", "my", "we", "our",
-    "you", "your", "he", "him", "his", "she", "her", "they", "them",
-    "their", "also", "up", "out", "over",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "shall", "should", "may", "might", "must", "can",
+    "could", "it", "its", "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into",
+    "through", "during", "before", "after", "and", "but", "or", "nor", "not", "so", "yet", "both",
+    "either", "neither", "each", "every", "all", "any", "few", "more", "most", "other", "some",
+    "such", "no", "only", "own", "same", "than", "too", "very", "just", "if", "because", "until",
+    "while", "about", "between", "under", "again", "there", "then", "once", "here", "where",
+    "when", "what", "which", "who", "whom", "that", "this", "these", "those", "me", "my", "we",
+    "our", "you", "your", "he", "him", "his", "she", "her", "they", "them", "their", "also", "up",
+    "out", "over",
 ];
 
 const DIMS: usize = 256;
@@ -58,7 +49,9 @@ pub struct MemoryEntry {
     pub vector: Option<Vec<f32>>,
 }
 
-fn default_scope() -> MemoryScope { MemoryScope::Session }
+fn default_scope() -> MemoryScope {
+    MemoryScope::Session
+}
 
 impl MemoryEntry {
     pub fn is_expired(&self) -> bool {
@@ -88,7 +81,6 @@ pub struct MemoryWorkspace {
     global_store: HashMap<String, MemoryEntry>,
     max_entries: usize,
     default_ttl: u64,
-    idf_cache: HashMap<String, f32>,
     vocabulary_dirty: bool,
 }
 
@@ -100,7 +92,6 @@ impl MemoryWorkspace {
             global_store: HashMap::new(),
             max_entries: 10000,
             default_ttl: 86400 * 7,
-            idf_cache: HashMap::new(),
             vocabulary_dirty: true,
         };
         let _ = std::fs::create_dir_all(&ws.workspace);
@@ -128,11 +119,7 @@ impl MemoryWorkspace {
         value: &serde_json::Value,
         tags: Option<Vec<String>>,
     ) -> MemoryEntry {
-        let vec = if let Some(text) = value.as_str() {
-            Some(Self::text_to_vector(text, DIMS))
-        } else {
-            None
-        };
+        let vec = value.as_str().map(|text| Self::text_to_vector(text, DIMS));
 
         let entry = MemoryEntry {
             key: key.to_string(),
@@ -164,11 +151,7 @@ impl MemoryWorkspace {
     }
 
     /// Retrieve a value from memory.
-    pub fn get(
-        &self,
-        session_id: &str,
-        key: &str,
-    ) -> Option<serde_json::Value> {
+    pub fn get(&self, session_id: &str, key: &str) -> Option<serde_json::Value> {
         self.find_key(key, Some(session_id), MemoryScope::Session, true, true)
             .filter(|e| !e.is_expired())
             .map(|e| e.value.clone())
@@ -201,7 +184,9 @@ impl MemoryWorkspace {
         let session_store = self.stores.get(session_id);
         let mut results = Vec::new();
 
-        let mut all_entries: Vec<(&String, &MemoryEntry)> = session_store.map(|s| s.iter().collect()).unwrap_or_default();
+        let mut all_entries: Vec<(&String, &MemoryEntry)> = session_store
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
         for (k, v) in &self.global_store {
             all_entries.push((k, v));
         }
@@ -214,7 +199,8 @@ impl MemoryWorkspace {
 
             // Tag matching
             if let Some(t) = tags {
-                let tag_score = t.iter().filter(|tag| entry.tags.contains(tag)).count() as f32 * 2.0;
+                let tag_score =
+                    t.iter().filter(|tag| entry.tags.contains(tag)).count() as f32 * 2.0;
                 score += tag_score;
             }
 
@@ -266,7 +252,9 @@ impl MemoryWorkspace {
         let session_store = self.stores.get(session_id);
         let mut scored = Vec::new();
 
-        let mut all_entries: Vec<&MemoryEntry> = session_store.map(|s| s.values().collect()).unwrap_or_default();
+        let mut all_entries: Vec<&MemoryEntry> = session_store
+            .map(|s| s.values().collect())
+            .unwrap_or_default();
         for v in self.global_store.values() {
             all_entries.push(v);
         }
@@ -302,7 +290,9 @@ impl MemoryWorkspace {
         let session_store = self.stores.get(session_id);
         let mut keys = Vec::new();
 
-        let mut all_entries: Vec<(&String, &MemoryEntry)> = session_store.map(|s| s.iter().collect()).unwrap_or_default();
+        let mut all_entries: Vec<(&String, &MemoryEntry)> = session_store
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
         for (k, v) in &self.global_store {
             all_entries.push((k, v));
         }
@@ -329,6 +319,42 @@ impl MemoryWorkspace {
         store_count + self.global_store.len()
     }
 
+    /// List all session IDs that have stored entries.
+    pub fn sessions(&self) -> Vec<String> {
+        self.stores.keys().cloned().collect()
+    }
+
+    /// List all (non-expired) keys stored under a given session.
+    pub fn keys_for_session(&self, session_id: &str) -> Vec<String> {
+        self.stores
+            .get(session_id)
+            .map(|store| {
+                store
+                    .iter()
+                    .filter(|(_, e)| !e.is_expired())
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// List all (non-expired) entries for a session as (key, value, tags) tuples.
+    pub fn entries_for_session(
+        &self,
+        session_id: &str,
+    ) -> Vec<(&str, &serde_json::Value, &[String])> {
+        self.stores
+            .get(session_id)
+            .map(|store| {
+                store
+                    .values()
+                    .filter(|e| !e.is_expired())
+                    .map(|e| (e.key.as_str(), &e.value, e.tags.as_slice()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Clear memory entries.
     pub fn clear(&mut self, session_id: Option<&str>, scope: MemoryScope) {
         match scope {
@@ -353,7 +379,8 @@ impl MemoryWorkspace {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() {
-                    let session_id = path.file_name()
+                    let session_id = path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
@@ -361,7 +388,9 @@ impl MemoryWorkspace {
                     let memory_file = path.join("memory.json");
                     if memory_file.exists() {
                         if let Ok(content) = std::fs::read_to_string(&memory_file) {
-                            if let Ok(data) = serde_json::from_str::<HashMap<String, MemoryEntry>>(&content) {
+                            if let Ok(data) =
+                                serde_json::from_str::<HashMap<String, MemoryEntry>>(&content)
+                            {
                                 self.stores.insert(session_id, data);
                                 debug!("Loaded session memory: {}", entry.path().display());
                             }
@@ -372,7 +401,12 @@ impl MemoryWorkspace {
         }
     }
 
-    fn persist_entry(&self, session_id: &str, key: &str, entry: &MemoryEntry) -> std::io::Result<()> {
+    fn persist_entry(
+        &self,
+        session_id: &str,
+        key: &str,
+        entry: &MemoryEntry,
+    ) -> std::io::Result<()> {
         let session_dir = self.workspace.join(session_id);
         std::fs::create_dir_all(&session_dir)?;
 
@@ -384,26 +418,18 @@ impl MemoryWorkspace {
             HashMap::new()
         };
 
-        index.insert(key.to_string(), serde_json::json!({
-            "updated": entry.updated_at.to_rfc3339(),
-            "scope": format!("{:?}", entry.scope).to_lowercase(),
-        }));
+        index.insert(
+            key.to_string(),
+            serde_json::json!({
+                "updated": entry.updated_at.to_rfc3339(),
+                "scope": format!("{:?}", entry.scope).to_lowercase(),
+            }),
+        );
 
         std::fs::write(&index_file, serde_json::to_string_pretty(&index)?)
     }
 
     // ─── Internal Helpers ─────────────────────────────────────
-
-    fn get_store(&mut self, session_id: Option<&str>, scope: MemoryScope) -> &mut HashMap<String, MemoryEntry> {
-        match scope {
-            MemoryScope::Global => &mut self.global_store,
-            MemoryScope::Project => self.stores.entry("_project_memory".to_string()).or_default(),
-            MemoryScope::Session => {
-                let sid = session_id.unwrap_or("").to_string();
-                self.stores.entry(sid).or_default()
-            }
-        }
-    }
 
     fn find_key(
         &self,
@@ -425,7 +451,8 @@ impl MemoryWorkspace {
                     }
                 }
                 if fallback_project {
-                    if let Some(entry) = self.stores.get("_project_memory").and_then(|s| s.get(key)) {
+                    if let Some(entry) = self.stores.get("_project_memory").and_then(|s| s.get(key))
+                    {
                         return Some(entry);
                     }
                 }
@@ -437,17 +464,13 @@ impl MemoryWorkspace {
         }
     }
 
-
-
     // ─── Vector Embedding & Similarity ────────────────────────
 
     fn tokenize(text: &str) -> Vec<String> {
         let re = Regex::new(r"[a-z_][a-z0-9_]{1,}").unwrap();
         re.find_iter(&text.to_lowercase())
             .map(|m| m.as_str().to_string())
-            .filter(|w| {
-                !STOP_WORDS.contains(&w.as_str()) && w.len() > 2
-            })
+            .filter(|w| !STOP_WORDS.contains(&w.as_str()) && w.len() > 2)
             .collect()
     }
 
@@ -549,8 +572,12 @@ mod tests {
     fn search_by_tags() {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ws = MemoryWorkspace::new(temp_dir.path().to_path_buf());
-        ws.store("s1", "k1", &serde_json::json!("research findings"),
-                 Some(vec!["research".to_string()]));
+        ws.store(
+            "s1",
+            "k1",
+            &serde_json::json!("research findings"),
+            Some(vec!["research".to_string()]),
+        );
         ws.store("s1", "k2", &serde_json::json!("other data"), None);
 
         let results = ws.search("s1", "research", Some(&["research".to_string()]), 10);
@@ -562,8 +589,18 @@ mod tests {
     fn vector_search_basic() {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ws = MemoryWorkspace::new(temp_dir.path().to_path_buf());
-        ws.store("s1", "k1", &serde_json::json!("rust async programming"), None);
-        ws.store("s1", "k2", &serde_json::json!("python synchronous code"), None);
+        ws.store(
+            "s1",
+            "k1",
+            &serde_json::json!("rust async programming"),
+            None,
+        );
+        ws.store(
+            "s1",
+            "k2",
+            &serde_json::json!("python synchronous code"),
+            None,
+        );
 
         let results = ws.similarity_search("s1", "async rust code", 5, 0.0);
         assert!(!results.is_empty());

@@ -2,7 +2,7 @@
 
 use crate::base::AgentImpl;
 use lab_core::config::AgentProfile;
-use lab_core::llm::LLMClient;
+use lab_core::llm::ChatMessage;
 use lab_core::types::AgentResult;
 use lab_memory::MemoryWorkspace;
 use lab_tools::ToolRegistry;
@@ -18,17 +18,28 @@ impl CoderAgent {
     pub fn new(id: String, session_id: String, profile: AgentProfile, workspace: PathBuf) -> Self {
         Self {
             impl_: AgentImpl::new(
-                id.clone(), "coder".into(), session_id, profile, workspace.clone(),
+                id.clone(),
+                "coder".into(),
+                session_id,
+                profile,
+                workspace.clone(),
             ),
             workspace,
         }
     }
 
-    pub fn id(&self) -> &str { self.impl_.id() }
-    pub fn session_id(&self) -> &str { self.impl_.session_id() }
-    pub fn state(&self) -> lab_core::types::AgentState { self.impl_.state() }
+    pub fn id(&self) -> &str {
+        self.impl_.id()
+    }
+    pub fn session_id(&self) -> &str {
+        self.impl_.session_id()
+    }
+    pub fn state(&self) -> lab_core::types::AgentState {
+        self.impl_.state()
+    }
 
     /// Execute: create or write a file. Supports direct content or template generation.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         registry: &mut ToolRegistry,
@@ -47,53 +58,155 @@ impl CoderAgent {
         let mut results = HashMap::new();
         let mut written_files = Vec::new();
 
+        // LLM-powered code generation: if path + task given but no content, ask LLM to generate
+        if let (Some(p), None, Some(llm_client), Some(mdl)) = (path, content, _llm, _model) {
+            let system = "\
+You are a senior Rust/Python engineer working inside the AI Research Lab — a multi-agent \
+research workspace built in Rust. When asked to generate code, produce clean, idiomatic code \
+that matches the project style: Rust uses anyhow for errors, serde for serialization, tokio \
+for async, and tracing for logging. Python uses type annotations, docstrings, and logging. \
+Output ONLY the raw file content — no markdown fences, no explanations, no commentary. \
+The output will be written directly to a file.";
+            let prompt = format!("Generate the file `{p}` for this task: {task}");
+            match llm_client
+                .chat(
+                    vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+                    mdl,
+                    0.2,
+                    2048,
+                )
+                .await
+            {
+                Ok(resp) => {
+                    let generated = resp.content.trim().to_string();
+                    let write_result = registry
+                        .execute(
+                            "write_file",
+                            &HashMap::from([
+                                ("path".into(), serde_json::json!(p)),
+                                ("content".into(), serde_json::json!(&generated)),
+                            ]),
+                        )
+                        .await;
+
+                    if write_result
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        let bytes = write_result
+                            .get("data")
+                            .and_then(|d| d.get("bytes_written"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        written_files
+                            .push(serde_json::json!({"path": p, "bytes": bytes, "method": "llm"}));
+                    } else {
+                        self.impl_.cleanup().await;
+                        return AgentResult::fail(
+                            format!("Failed to write LLM-generated file {p}"),
+                            Some(write_result),
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("CoderAgent LLM generation failed: {e}");
+                }
+            }
+        }
+
         if let Some(p) = path {
             let text = content.unwrap_or("");
             if !text.is_empty() {
                 // Direct write mode
-                let result = registry.execute("write_file", &HashMap::from([
-                    ("path".into(), serde_json::json!(p)),
-                    ("content".into(), serde_json::json!(text)),
-                ])).await;
+                let result = registry
+                    .execute(
+                        "write_file",
+                        &HashMap::from([
+                            ("path".into(), serde_json::json!(p)),
+                            ("content".into(), serde_json::json!(text)),
+                        ]),
+                    )
+                    .await;
 
-                if !result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if !result
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
                     self.impl_.cleanup().await;
                     return AgentResult::fail(format!("Failed to write {p}"), Some(result));
                 }
 
-                let bytes = result.get("data").and_then(|d| d.get("bytes_written")).and_then(|v| v.as_u64()).unwrap_or(0);
+                let bytes = result
+                    .get("data")
+                    .and_then(|d| d.get("bytes_written"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 written_files.push(serde_json::json!({"path": p, "bytes": bytes}));
             }
 
             // Verify what we wrote
-            let verify = registry.execute("read_file", &HashMap::from([
-                ("path".into(), serde_json::json!(p)),
-                ("limit".into(), serde_json::json!(5)),
-            ])).await;
+            let verify = registry
+                .execute(
+                    "read_file",
+                    &HashMap::from([
+                        ("path".into(), serde_json::json!(p)),
+                        ("limit".into(), serde_json::json!(5)),
+                    ]),
+                )
+                .await;
 
-            results.insert("verified".to_string(), serde_json::json!(
-                verify.get("success").and_then(|v| v.as_bool()).unwrap_or(false)
-            ));
-            if let Some(preview) = verify.get("data").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
-                results.insert("preview".to_string(), serde_json::json!(&preview[..preview.len().min(500)]));
+            results.insert(
+                "verified".to_string(),
+                serde_json::json!(verify
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)),
+            );
+            if let Some(preview) = verify
+                .get("data")
+                .and_then(|d| d.get("content"))
+                .and_then(|c| c.as_str())
+            {
+                results.insert(
+                    "preview".to_string(),
+                    serde_json::json!(&preview[..preview.len().min(500)]),
+                );
             }
         } else if let Some(tmpl) = template {
             // Template generation mode
-            let name = tmpl.replace('_', " ").replace('-', " ");
+            let name = tmpl.replace(['_', '-'], " ");
             let output_path = format!("src/{name}.py");
             let template_content = format!("\"\"\"{name} module.\"\"\"\n\nfrom __future__ import annotations\n\nimport logging\n\nlogger = logging.getLogger(__name__)\n\n\ndef main() -> None:\n    \"\"\"Entry point for {name}.\"\"\"\n    logger.info(\"{name} running\")\n\n\nif __name__ == \"__main__\":\n    main()\n");
 
-            let result = registry.execute("write_file", &HashMap::from([
-                ("path".into(), serde_json::json!(output_path)),
-                ("content".into(), serde_json::json!(template_content)),
-            ])).await;
+            let result = registry
+                .execute(
+                    "write_file",
+                    &HashMap::from([
+                        ("path".into(), serde_json::json!(output_path)),
+                        ("content".into(), serde_json::json!(template_content)),
+                    ]),
+                )
+                .await;
 
-            if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let bytes = result.get("data").and_then(|d| d.get("bytes_written")).and_then(|v| v.as_u64()).unwrap_or(0);
+            if result
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                let bytes = result
+                    .get("data")
+                    .and_then(|d| d.get("bytes_written"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 written_files.push(serde_json::json!({"path": output_path, "bytes": bytes}));
             } else {
                 self.impl_.cleanup().await;
-                return AgentResult::fail(format!("Failed to generate template for {name}"), Some(result));
+                return AgentResult::fail(
+                    format!("Failed to generate template for {name}"),
+                    Some(result),
+                );
             }
         }
 
