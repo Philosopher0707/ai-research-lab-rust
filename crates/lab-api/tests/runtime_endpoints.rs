@@ -8,7 +8,7 @@ use support::TestServer;
 #[tokio::test]
 async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
     let workspace = tempfile::tempdir().expect("Failed to create temp workspace");
-    std::fs::create_dir_all(workspace.path().join("src")).unwrap();
+    std::fs::create_dir_all(workspace.path().join("src")).expect("Failed to create src directory");
     std::fs::write(
         workspace.path().join("src/lib.rs"),
         "pub fn meaning() -> i32 {\n    42\n}\n",
