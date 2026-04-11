@@ -13,7 +13,7 @@ async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
         workspace.path().join("src/lib.rs"),
         "pub fn meaning() -> i32 {\n    42\n}\n",
     )
-    .unwrap();
+    .expect("Failed to write src/lib.rs");
 
     let server = TestServer::start(LabConfig::with_workspace(workspace.path().to_path_buf())).await;
     let client = reqwest::Client::new();
@@ -25,7 +25,7 @@ async fn runtime_endpoints_cover_sessions_memory_tools_agents_and_ask() {
         .unwrap()
         .json()
         .await
-        .unwrap();
+        .expect("Failed to create src directory");
     assert_eq!(health["status"], "healthy");
 
     let tools: Value = client

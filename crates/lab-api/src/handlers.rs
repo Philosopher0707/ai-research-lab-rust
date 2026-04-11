@@ -239,8 +239,8 @@ pub async fn event_history(
         .get("limit")
         .and_then(|value| value.parse().ok())
         .unwrap_or(50);
-    let lab = state.lab.read().await;
-    Json(lab.event_bus().get_history_json(filter, limit))
+    // Access event history directly from the shared Arc — no lab lock needed.
+    Json(state.events.get_history_json(filter, limit))
 }
 
 pub async fn run_pipeline(
@@ -392,7 +392,8 @@ pub async fn ws_events(
 }
 
 async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
-    let mut rx = state.event_tx.subscribe();
+    // Subscribe to the shared event bus directly — no bridge channel needed.
+    let mut rx = state.events.subscribe();
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     let _ = ws_tx
@@ -412,7 +413,13 @@ async fn handle_ws(socket: WebSocket, state: Arc<AppState>) {
         tokio::select! {
             message = rx.recv() => {
                 match message {
-                    Ok(data) => {
+                    Ok(event) => {
+                        let data = serde_json::json!({
+                            "type": event.event_type,
+                            "data": event.data,
+                            "source": event.source,
+                        })
+                        .to_string();
                         if ws_tx.send(Message::Text(data.into())).await.is_err() {
                             break;
                         }

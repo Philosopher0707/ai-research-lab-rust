@@ -6,6 +6,7 @@
 //! It mirrors the Python implementation in `core/lab/config.py` while adding Rust-specific
 //! features like strong typing and environment-aware defaults.
 
+use crate::providers;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -88,52 +89,32 @@ fn env_non_empty(name: &str) -> Option<String> {
 }
 
 fn provider_api_env_key(provider: &str) -> Option<&'static str> {
-    match provider {
-        "anthropic" => Some("ANTHROPIC_API_KEY"),
-        "openai" => Some("OPENAI_API_KEY"),
-        "openrouter" => Some("OPENROUTER_API_KEY"),
-        "deepseek" => Some("DEEPSEEK_API_KEY"),
-        "zhipu" => Some("ZHIPU_API_KEY"),
-        "minimax" => Some("MINIMAX_API_KEY"),
-        "xai" => Some("XAI_API_KEY"),
-        _ => None,
-    }
+    providers::find(provider)
+        .filter(|p| !p.env_key.is_empty())
+        .map(|p| p.env_key)
 }
 
 fn provider_default_base_url(provider: &str) -> &'static str {
-    match provider {
-        "anthropic" => "https://api.anthropic.com",
-        "openai" => "https://api.openai.com/v1",
-        "openrouter" => "https://openrouter.ai/api/v1",
-        "deepseek" => "https://api.deepseek.com/v1",
-        "zhipu" => "https://open.bigmodel.cn/api/paas/v4",
-        "minimax" => "https://api.minimax.chat/v1",
-        "xai" => "https://api.x.ai/v1",
-        "local" => "http://localhost:11434/v1",
-        _ => "https://openrouter.ai/api/v1",
-    }
+    providers::find(provider)
+        .map(|p| p.base_url)
+        .unwrap_or("https://openrouter.ai/api/v1")
 }
 
 fn provider_default_model(provider: &str) -> &'static str {
-    match provider {
-        "anthropic" => "claude-sonnet-4-6",
-        "openai" => "gpt-4o",
-        "openrouter" => "anthropic/claude-sonnet-4-5",
-        "deepseek" => "deepseek-chat",
-        "zhipu" => "glm-4-flash",
-        "minimax" => "MiniMax-Text-01",
-        "xai" => "grok-2",
-        "local" => "llama3.2",
-        _ => "anthropic/claude-sonnet-4-20250514",
-    }
+    providers::find(provider)
+        .map(|p| p.default_model)
+        .unwrap_or("anthropic/claude-sonnet-4-20250514")
 }
 
 fn provider_supports_keyless_access(provider: &str) -> bool {
-    provider == "local"
+    providers::find(provider).map(|p| p.keyless).unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+/// Runtime environment profile.
+///
+/// Controls logging, debugging, and other environment-specific behavior.
 pub enum RuntimeProfile {
     #[default]
     Development,
@@ -143,6 +124,7 @@ pub enum RuntimeProfile {
 }
 
 impl RuntimeProfile {
+    /// Returns the profile as a string slice.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Development => "development",
@@ -152,6 +134,7 @@ impl RuntimeProfile {
         }
     }
 
+    /// Attempts to parse the runtime profile from the `LAB_PROFILE` environment variable.
     pub fn from_env() -> Option<Self> {
         env_non_empty("LAB_PROFILE").and_then(|value| value.parse().ok())
     }
@@ -213,6 +196,9 @@ fn detect_provider_from_env() -> Option<&'static str> {
 // ─── AgentProfile ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Configuration profile for an individual agent.
+///
+/// Defines behavior, limits, and preferences for an agent instance.
 pub struct AgentProfile {
     pub name: String,
     pub role: String,
@@ -797,7 +783,7 @@ impl LabConfig {
             .cloned()
             .unwrap_or_else(|| self.workspace.join("lab-config.toml"));
         let content = toml::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         if let Some(parent) = save_path.parent() {
             std::fs::create_dir_all(parent)?;
         }

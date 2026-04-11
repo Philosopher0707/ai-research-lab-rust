@@ -2,6 +2,32 @@
 
 use thiserror::Error;
 
+/// Typed errors from LLM provider calls.
+///
+/// These are surfaced through `LLMClient::chat()` and can be matched
+/// for targeted handling (retry on `RateLimited`, fallback on `NotConfigured`).
+#[derive(Debug, Error)]
+pub enum LLMError {
+    #[error("LLM not configured: no API key set for the selected provider")]
+    NotConfigured,
+    #[error("API error {status}: {message}")]
+    ApiError { status: u16, message: String },
+    #[error("Rate limited by provider")]
+    RateLimited,
+    #[error("Budget or quota exceeded")]
+    BudgetExceeded,
+    #[error("Network error: {0}")]
+    Network(String),
+    #[error("Malformed response: {0}")]
+    MalformedResponse(String),
+}
+
+impl From<LLMError> for LabError {
+    fn from(e: LLMError) -> Self {
+        LabError::LLMError(e.to_string())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum LabError {
     #[error("Session not found: {0}")]

@@ -16,8 +16,9 @@ use lab_memory::MemoryWorkspace;
 use lab_permissions::PermissionEngine;
 use lab_tools::ToolRegistry;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Master orchestrator for the AI Research Lab.
 ///
@@ -37,7 +38,7 @@ pub struct ResearchLab {
     agent_registry: HashMap<String, HashMap<String, serde_json::Value>>, // session -> agent_id -> metadata
     tool_registry: ToolRegistry,
     permission_engine: PermissionEngine,
-    event_bus: EventBus,
+    event_bus: Arc<EventBus>,
     memory: MemoryWorkspace,
     session_store: SessionStore,
     llm_client: Option<Box<dyn LLMClient>>,
@@ -64,7 +65,7 @@ impl ResearchLab {
             llm_client,
         } = container;
 
-        let mut lab = Self {
+        Self {
             config,
             sessions: HashMap::new(),
             agent_registry: HashMap::new(),
@@ -78,21 +79,7 @@ impl ResearchLab {
             operation_counts: OperationCounts::default(),
             running: false,
             start_time: None,
-        };
-
-        // Subscribe all events for auditing
-        let verbose = lab.config.verbose_logging;
-        lab.event_bus.subscribe_all(move |event| {
-            if verbose {
-                debug!(
-                    "[EVENT] {}: {}",
-                    event.event_type,
-                    serde_json::to_string(&event.data).unwrap_or_default()
-                );
-            }
-        });
-
-        lab
+        }
     }
 
     // ─── Session Management ─────────────────────────────────────
@@ -366,14 +353,15 @@ impl ResearchLab {
 
     // ─── Events ──────────────────────────────────────────────────
 
-    /// Access the event bus.
+    /// Access the event bus by reference.
     pub fn event_bus(&self) -> &EventBus {
         &self.event_bus
     }
 
-    /// Access the event bus mutably.
-    pub fn event_bus_mut(&mut self) -> &mut EventBus {
-        &mut self.event_bus
+    /// Clone the `Arc<EventBus>` — useful for sharing the bus with the API
+    /// server without holding a lock on the lab.
+    pub fn event_bus_arc(&self) -> Arc<EventBus> {
+        Arc::clone(&self.event_bus)
     }
 
     // ─── LLM ──────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ use crate::sessions::SessionStore;
 use lab_memory::MemoryWorkspace;
 use lab_permissions::{PermissionEngine, PermissionPolicy};
 use lab_tools::{ToolPlugin, ToolRegistry};
+use std::sync::Arc;
 
 enum LlmClientMode {
     Auto,
@@ -19,7 +20,9 @@ pub struct LabContainer {
     pub tool_registry: ToolRegistry,
     pub permission_engine: PermissionEngine,
     pub session_store: SessionStore,
-    pub event_bus: EventBus,
+    /// Shared event bus — wrapped in `Arc` so the API server can hold its own
+    /// clone without needing to lock the lab to subscribe or emit events.
+    pub event_bus: Arc<EventBus>,
     pub llm_client: Option<Box<dyn LLMClient>>,
 }
 
@@ -30,7 +33,7 @@ pub struct LabContainerBuilder {
     tool_registry: Option<ToolRegistry>,
     permission_engine: Option<PermissionEngine>,
     session_store: Option<SessionStore>,
-    event_bus: Option<EventBus>,
+    event_bus: Option<Arc<EventBus>>,
     llm_mode: LlmClientMode,
     tool_plugins: Vec<Box<dyn ToolPlugin>>,
     register_builtin_tools: bool,
@@ -71,7 +74,7 @@ impl LabContainerBuilder {
         self
     }
 
-    pub fn with_event_bus(mut self, event_bus: EventBus) -> Self {
+    pub fn with_event_bus(mut self, event_bus: Arc<EventBus>) -> Self {
         self.event_bus = Some(event_bus);
         self
     }
@@ -112,13 +115,16 @@ impl LabContainerBuilder {
             tool_registry.register_plugin(plugin);
         }
 
-        let permission_engine = self.permission_engine.unwrap_or_else(|| {
-            PermissionEngine::new(PermissionPolicy::default())
-        });
+        let permission_engine = self
+            .permission_engine
+            .unwrap_or_else(|| PermissionEngine::new(PermissionPolicy::default()));
         let session_store = self
             .session_store
             .unwrap_or_else(|| SessionStore::new(config.full_path(&config.sessions_dir)));
-        let event_bus = self.event_bus.unwrap_or_else(|| EventBus::new(1000));
+        let event_bus = self
+            .event_bus
+            .unwrap_or_else(|| Arc::new(EventBus::new(512, 1000)));
+
         let llm_client = match self.llm_mode {
             LlmClientMode::Auto if config.llm_configured() && !config.provider.is_empty() => {
                 Some(create_client(

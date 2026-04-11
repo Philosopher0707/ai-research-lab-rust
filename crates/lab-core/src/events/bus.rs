@@ -1,9 +1,16 @@
-//! Async pub/sub event bus with pattern matching.
-//! Mirrors core/events/bus.py (200 lines)
+//! Async pub/sub event bus backed by `tokio::sync::broadcast`.
+//!
+//! Key improvements over the previous callback-based design:
+//! - `emit(&self)` — no exclusive lock on the lab needed to publish events.
+//! - `subscribe()` returns a `broadcast::Receiver<LabEvent>` — callers drive
+//!   their own async loop rather than registering synchronous closures.
+//! - `EventBus` is `Clone + Send + Sync` so it can be wrapped in `Arc` and
+//!   shared between the lab engine and the API state without a bridge channel.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
+use tokio::sync::broadcast;
 
 // ─── LabEvent ──────────────────────────────────────────────────────
 
@@ -57,7 +64,7 @@ impl LabEvent {
         self
     }
 
-    /// Get the event category (first part of dot-joined type).
+    /// Returns the event category — the part before the first dot (e.g. `"tool"`).
     pub fn category(&self) -> &str {
         self.event_type.split('.').next().unwrap_or("")
     }
@@ -84,170 +91,79 @@ pub enum EventPriority {
     Critical,
 }
 
-// ─── Subscriber ─────────────────────────────────────────────────────
-
-type EventHandler = Arc<dyn Fn(LabEvent) + Send + Sync>;
-
-struct Subscriber {
-    handler: EventHandler,
-    match_once: bool,
-    _priority: i32,
-}
-
 // ─── EventBus ──────────────────────────────────────────────────────
 
+/// Broadcast-based event bus.
+///
+/// Wrapping in `Arc<EventBus>` lets the lab engine and the API server share
+/// the same bus without any bridge tasks or extra channels.
 pub struct EventBus {
-    // pattern -> subscribers
-    subscribers: HashMap<String, Vec<Subscriber>>,
-    history: VecDeque<LabEvent>,
+    tx: broadcast::Sender<LabEvent>,
+    history: Arc<RwLock<VecDeque<LabEvent>>>,
     max_history: usize,
 }
 
 impl EventBus {
-    pub fn new(max_history: usize) -> Self {
+    /// Create a new bus.
+    ///
+    /// - `capacity`: broadcast channel buffer depth (lagged receivers get an error).
+    /// - `max_history`: how many events to keep in the in-memory ring buffer.
+    pub fn new(capacity: usize, max_history: usize) -> Self {
+        let (tx, _) = broadcast::channel(capacity);
         Self {
-            subscribers: HashMap::new(),
-            history: VecDeque::with_capacity(max_history),
+            tx,
+            history: Arc::new(RwLock::new(VecDeque::with_capacity(max_history.min(4096)))),
             max_history,
         }
     }
 
-    /// Subscribe to events matching a pattern.
-    pub fn subscribe(
-        &mut self,
-        event_pattern: &str,
-        handler: impl Fn(LabEvent) + Send + Sync + 'static,
-    ) {
-        self.subscribe_with_priority(event_pattern, handler, 0);
-    }
-
-    /// Subscribe with priority.
-    pub fn subscribe_with_priority(
-        &mut self,
-        event_pattern: &str,
-        handler: impl Fn(LabEvent) + Send + Sync + 'static,
-        priority: i32,
-    ) {
-        let pat = if event_pattern.is_empty() {
-            "*".to_string()
-        } else {
-            event_pattern.to_string()
-        };
-        self.subscribers.entry(pat).or_default().push(Subscriber {
-            handler: Arc::new(handler),
-            match_once: false,
-            _priority: priority,
-        });
-    }
-
-    /// Subscribe once (auto-unsubscribe after first match).
-    pub fn subscribe_once(
-        &mut self,
-        event_pattern: &str,
-        handler: impl Fn(LabEvent) + Send + Sync + 'static,
-    ) {
-        let pat = event_pattern.to_string();
-        self.subscribers.entry(pat).or_default().push(Subscriber {
-            handler: Arc::new(handler),
-            match_once: true,
-            _priority: 0,
-        });
-    }
-
-    /// Subscribe to ALL events.
-    pub fn subscribe_all(&mut self, handler: impl Fn(LabEvent) + Send + Sync + 'static) {
-        self.subscribers
-            .entry("*".to_string())
-            .or_default()
-            .push(Subscriber {
-                handler: Arc::new(handler),
-                match_once: false,
-                _priority: 0,
-            });
-    }
-
-    /// Emit an event to all matching subscribers.
-    pub fn emit(&mut self, event: LabEvent) {
-        // Record in history
-        self.history.push_back(event.clone());
-        while self.history.len() > self.max_history {
-            self.history.pop_front();
-        }
-        // Dispatch to subscribers
-        self.dispatch(&event);
-    }
-
-    /// Dispatch to matching subscribers.
-    fn dispatch(&mut self, event: &LabEvent) {
-        let mut patterns_to_remove: Vec<(String, usize)> = Vec::new();
-
-        for (pattern, handlers) in self.subscribers.iter_mut() {
-            if Self::matches(pattern, &event.event_type) {
-                for (i, sub) in handlers.iter().enumerate() {
-                    (sub.handler)(event.clone());
-                    if sub.match_once {
-                        patterns_to_remove.push((pattern.clone(), i));
-                    }
-                }
+    /// Publish an event. Never blocks; `&self` only — no exclusive lock needed.
+    ///
+    /// If no subscribers are active the event is still recorded in history.
+    pub fn emit(&self, event: LabEvent) {
+        if let Ok(mut hist) = self.history.write() {
+            hist.push_back(event.clone());
+            while hist.len() > self.max_history {
+                hist.pop_front();
             }
         }
-
-        // Remove one-shot subscribers (reverse order to avoid index shift)
-        for (pattern, idx) in patterns_to_remove.iter().rev() {
-            if let Some(handlers) = self.subscribers.get_mut(pattern) {
-                if *idx < handlers.len() {
-                    handlers.remove(*idx);
-                }
-            }
-        }
+        // Sending to zero receivers is not an error; the result is just dropped.
+        let _ = self.tx.send(event);
     }
 
-    /// Check if a pattern matches an event type.
-    fn matches(pattern: &str, event_type: &str) -> bool {
-        if pattern == "*" {
-            return true;
-        }
-        let pat_parts: Vec<&str> = pattern.split('.').collect();
-        let evt_parts: Vec<&str> = event_type.split('.').collect();
-
-        if pat_parts.len() != evt_parts.len() {
-            // Allow trailing wildcard: "agent.*" matches "agent.started"
-            if pat_parts.len() == 2
-                && pat_parts[1] == "*"
-                && pat_parts[0] == evt_parts.get(0).copied().unwrap_or("")
-            {
-                return true;
-            }
-            if pat_parts.len() == 1 && pat_parts[0] == "*" {
-                return true;
-            }
-            return false;
-        }
-
-        for (pat, evt) in pat_parts.iter().zip(evt_parts.iter()) {
-            if *pat != "*" && *pat != *evt {
-                return false;
-            }
-        }
-        true
+    /// Subscribe to all events. Returns a `broadcast::Receiver<LabEvent>`.
+    ///
+    /// The receiver will get every event emitted after this call. Lagged
+    /// receivers get `RecvError::Lagged` — callers should handle that and continue.
+    pub fn subscribe(&self) -> broadcast::Receiver<LabEvent> {
+        self.tx.subscribe()
     }
 
-    /// Get event history, optionally filtered.
+    /// Get cached event history, optionally filtered by pattern, newest-first.
+    ///
+    /// Pattern syntax mirrors the original bus:
+    /// - `"*"` — all events
+    /// - `"agent.*"` — all events in the `agent` category
+    /// - `"tool.executed"` — exact type match
     pub fn get_history(&self, filter: Option<&str>, limit: usize) -> Vec<LabEvent> {
+        let hist = match self.history.read() {
+            Ok(h) => h,
+            Err(e) => e.into_inner(),
+        };
+        let effective_limit = if limit == 0 { self.max_history } else { limit };
         if let Some(f) = filter {
-            self.history
-                .iter()
-                .filter(|e| Self::matches(f, &e.event_type))
-                .cloned()
+            hist.iter()
                 .rev()
-                .take(limit)
+                .filter(|e| Self::matches(f, &e.event_type))
+                .take(effective_limit)
+                .cloned()
                 .collect()
         } else {
-            self.history.iter().rev().take(limit).cloned().collect()
+            hist.iter().rev().take(effective_limit).cloned().collect()
         }
     }
 
-    /// Get history as JSON values.
+    /// Convenience: return history as a JSON array suitable for API responses.
     pub fn get_history_json(&self, filter: Option<&str>, limit: usize) -> serde_json::Value {
         let events: Vec<_> = self
             .get_history(filter, limit)
@@ -256,20 +172,49 @@ impl EventBus {
             .collect();
         serde_json::Value::Array(events)
     }
+
+    // ─── Pattern matching ──────────────────────────────────────────
+
+    /// Returns true if `pattern` matches `event_type`.
+    ///
+    /// Rules:
+    /// - `"*"` matches everything.
+    /// - `"agent.*"` matches any event whose first segment is `"agent"`.
+    /// - Exact strings match only themselves.
+    pub fn matches(pattern: &str, event_type: &str) -> bool {
+        if pattern == "*" {
+            return true;
+        }
+        let pat: Vec<&str> = pattern.split('.').collect();
+        let evt: Vec<&str> = event_type.split('.').collect();
+
+        // Trailing wildcard: "agent.*" matches "agent.started"
+        if pat.len() == 2 && pat[1] == "*" {
+            return pat[0] == evt.first().copied().unwrap_or("");
+        }
+
+        if pat.len() != evt.len() {
+            return false;
+        }
+
+        pat.iter().zip(evt.iter()).all(|(p, e)| *p == "*" || p == e)
+    }
 }
 
 impl Default for EventBus {
     fn default() -> Self {
-        Self::new(1000)
+        Self::new(512, 1000)
     }
 }
+
+// ─── Tests ─────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_pattern_matching() {
+    fn pattern_matching() {
         assert!(EventBus::matches("*", "anything.here"));
         assert!(EventBus::matches("agent.*", "agent.started"));
         assert!(EventBus::matches("tool.executed", "tool.executed"));
@@ -278,17 +223,51 @@ mod tests {
     }
 
     #[test]
-    fn test_emit_and_history() {
-        let mut bus = EventBus::new(100);
-        let event = LabEvent::new("test.event", serde_json::json!({"key": "val"}));
-        bus.emit(event);
+    fn emit_records_history() {
+        let bus = EventBus::new(16, 100);
+        bus.emit(LabEvent::new("test.event", serde_json::json!({"key": "val"})));
         let history = bus.get_history(None, 10);
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].event_type, "test.event");
     }
 
     #[test]
-    fn test_category() {
+    fn history_capped_at_max() {
+        let bus = EventBus::new(16, 3);
+        for i in 0..5u32 {
+            bus.emit(LabEvent::new(format!("ev.{}", i), serde_json::json!({})));
+        }
+        assert_eq!(bus.get_history(None, 100).len(), 3);
+    }
+
+    #[test]
+    fn history_filtered() {
+        let bus = EventBus::new(16, 100);
+        bus.emit(LabEvent::new("tool.executed", serde_json::json!({})));
+        bus.emit(LabEvent::new("agent.started", serde_json::json!({})));
+        let filtered = bus.get_history(Some("tool.*"), 10);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].event_type, "tool.executed");
+    }
+
+    #[tokio::test]
+    async fn subscribe_receives_emitted_events() {
+        let bus = EventBus::new(16, 100);
+        let mut rx = bus.subscribe();
+        bus.emit(LabEvent::new("session.created", serde_json::json!({})));
+        let event = rx.recv().await.expect("should receive event");
+        assert_eq!(event.event_type, "session.created");
+    }
+
+    #[test]
+    fn emit_no_receiver_does_not_panic() {
+        let bus = EventBus::new(16, 100);
+        // No subscriber — should not panic
+        bus.emit(LabEvent::new("orphan.event", serde_json::json!({})));
+    }
+
+    #[test]
+    fn category() {
         let event = LabEvent::new("tool.executed", serde_json::json!({}));
         assert_eq!(event.category(), "tool");
     }
