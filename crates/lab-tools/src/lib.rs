@@ -44,7 +44,10 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn category(&self) -> &str;
-    async fn execute(&self, params: &HashMap<String, serde_json::Value>) -> ToolResult;
+    async fn execute(
+        &self,
+        params: &HashMap<String, serde_json::Value>,
+    ) -> ToolResult;
 }
 
 pub trait ToolPlugin: Send + Sync {
